@@ -22,11 +22,7 @@
 <script type="text/babel" data-presets="react">
 
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  PASO ÚNICO DE CONFIGURACIÓN:                                ║
-// ║  Pegá acá abajo los dos datos de tu proyecto de Supabase     ║
-// ║  (Supabase → Settings → API):                                ║
-// ║   - Project URL  →  en SUPABASE_URL                          ║
-// ║   - anon public key  →  en SUPABASE_ANON_KEY                 ║
+// ║  Configuración de Supabase (ya cargada)                      ║
 // ╚══════════════════════════════════════════════════════════════╝
 const SUPABASE_URL = "https://sxejkjtgzdmfglqcvdmq.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_7ZirjZx2EecSKtcg5lDirg_Ef4Finpj";
@@ -45,7 +41,16 @@ const C = {
   transferSuave: "#E9EDF5", ambar: "#B08A3E",
 };
 
-// ————— Datos precargados —————
+// ————— Colores por entidad —————
+const PALETA_ENTIDADES = ["#7C6BA8", "#4A8FA8", "#5E8C74", "#B08A3E", "#A85C74", "#6B7FA8", "#9A5FA0", "#3E9E8E", "#B0703E", "#8A9A3E", "#C25E8A", "#5E6FB8"];
+const colorEntidad = (nombre) => {
+  let h = 0;
+  const s = String(nombre || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PALETA_ENTIDADES[h % PALETA_ENTIDADES.length];
+};
+
+// ————— Datos precargados (solo se usan la primera vez, si no hay datos guardados) —————
 const CUENTAS_PRECARGADAS = [
   { nombre: "Caja de ahorro USD", entidad: "Banco Francés", clase: "ahorro", moneda: "USD" },
   { nombre: "Tarjeta de crédito", entidad: "Banco Francés", clase: "credito", moneda: "ARS" },
@@ -110,14 +115,33 @@ const fmt = (n, moneda) => {
   const v = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n);
   return moneda === "USD" ? `US$ ${v}` : `$ ${v}`;
 };
-const hoy = () => new Date().toISOString().slice(0, 10);
+// Fecha LOCAL (no UTC) — importante para que los movimientos de la noche queden en el día correcto
+const hoy = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const mesActual = () => hoy().slice(0, 7);
+const diaHoy = () => new Date().getDate();
 const fmtFecha = (iso) => { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y.slice(2)}`; };
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const nombreMes = (ym) => { const [y, m] = ym.split("-"); return `${MESES[parseInt(m, 10) - 1]} ${y}`; };
 const mesAnterior = (ym) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 const mesSiguiente = (ym) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
-const diaHoy = () => new Date().getDate();
+// Sumar meses a una fecha ISO, ajustando el día si el mes destino es más corto
+const sumarMeses = (iso, n) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const base = new Date(y, m - 1 + n, 1);
+  const ultimoDia = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+  const dia = Math.min(d, ultimoDia);
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+};
+const diasHastaDia = (dia) => {
+  const hoyD = diaHoy();
+  if (dia >= hoyD) return dia - hoyD;
+  const ahora = new Date();
+  const diasDelMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate();
+  return diasDelMes - hoyD + dia;
+};
 const parseMonto = (s) => {
   if (!s) return NaN;
   let t = String(s).trim().replace(/\s/g, "");
@@ -126,6 +150,49 @@ const parseMonto = (s) => {
 };
 const CLASES = { ahorro: "Caja de ahorro", credito: "Tarjeta de crédito", inversion: "Inversión", billetera: "Billetera", efectivo: "Efectivo" };
 const etiquetaCuenta = (c) => (!c ? "—" : c.entidad === "Efectivo" || c.entidad === "Mercado Pago" ? c.nombre : `${c.entidad} · ${c.nombre}`);
+
+// Moneda real de un movimiento: la elegida en el consumo (tarjetas) o la de la cuenta
+const monedaDelMov = (m, cuentas) => m.monedaMov || ((cuentas.find((c) => c.id === m.cuentaId) || {}).moneda || "ARS");
+
+// Movimiento que paga un fijo en un mes dado: el vinculado con el botón Pagar,
+// o cualquier gasto de ese mes con el mismo grupo y categoría (cargado desde Inicio).
+const movQuePagaFijo = (data, fijo, mes) => {
+  const link = (data.pagosFijos[mes] || {})[fijo.id];
+  if (link) {
+    const lm = data.movs.find((m) => m.id === link);
+    if (lm) return lm;
+  }
+  return data.movs.find((m) => m.tipo === "gasto" && m.grupo === fijo.grupo && m.categoria === fijo.categoria && m.fecha.slice(0, 7) === mes) || null;
+};
+
+// Deudas de tarjetas por moneda (solo consumos hasta hoy; las cuotas futuras suman en su mes)
+const calcularDeudasTarjetas = (data) => {
+  const t = {};
+  const corte = hoy();
+  data.cuentas.filter((c) => c.clase === "credito").forEach((c) => {
+    t[c.id] = { ARS: 0, USD: 0 };
+    const ini = c.inicial || 0;
+    if (ini < 0) t[c.id][c.moneda] += -ini;
+    else t[c.id][c.moneda] -= ini;
+  });
+  data.movs.forEach((m) => {
+    if (m.fecha > corte) return;
+    const cta = data.cuentas.find((c) => c.id === m.cuentaId);
+    const dest = m.cuentaDestinoId && data.cuentas.find((c) => c.id === m.cuentaDestinoId);
+    if (m.tipo === "gasto" && cta && cta.clase === "credito") {
+      const mon = m.monedaMov || cta.moneda;
+      t[cta.id][mon] += m.monto;
+    }
+    if (m.tipo === "transfer" && dest && dest.clase === "credito") {
+      const mon = m.monedaPagoTarjeta || dest.moneda;
+      t[dest.id][mon] -= m.montoDestino != null ? m.montoDestino : m.monto;
+    }
+    if (m.tipo === "transfer" && cta && cta.clase === "credito") {
+      t[cta.id][cta.moneda] += m.monto;
+    }
+  });
+  return t;
+};
 
 // ————— Raíz: config → sesión → app —————
 function Root() {
@@ -160,9 +227,8 @@ function PantallaConfig() {
         <div style={S.eyebrow}>Falta un paso</div>
         <h2 style={{ margin: "6px 0 10px", color: C.tinta }}>Conectar con Supabase</h2>
         <p style={{ fontSize: 14, color: C.tintaSuave, lineHeight: 1.6 }}>
-          Abrí el archivo <b>index.html</b> y pegá tu <b>Project URL</b> y tu <b>anon public key</b> donde
-          dice "PEGA_ACA…" (las encontrás en Supabase → Settings → API). Guardá el archivo, volvé a subirlo
-          y recargá esta página.
+          Abrí el archivo <b>index.html</b> y pegá tu <b>Project URL</b> y tu <b>Publishable key</b> al principio del código.
+          Guardá el archivo, volvé a subirlo y recargá esta página.
         </p>
       </div>
     </div>
@@ -171,7 +237,7 @@ function PantallaConfig() {
 
 // ————— Login —————
 function Login() {
-  const [modo, setModo] = useState("ingresar"); // ingresar | crear
+  const [modo, setModo] = useState("ingresar");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [error, setError] = useState("");
@@ -189,9 +255,7 @@ function Login() {
       if (modo === "crear") {
         const { data, error: e } = await sb.auth.signUp({ email: email.trim(), password: pass });
         if (e) throw e;
-        if (data.session) {
-          // sesión iniciada directamente
-        } else {
+        if (!data.session) {
           setMensaje("¡Cuenta creada! Revisá tu email para confirmarla y después ingresá.");
         }
       } else {
@@ -254,27 +318,31 @@ function Login() {
 function MisFinanzas({ session }) {
   const [data, setData] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState(false);
   const [errorStorage, setErrorStorage] = useState(false);
   const [tab, setTab] = useState("inicio");
   const [aviso, setAviso] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data: fila, error } = await sb
-          .from("finanzas")
-          .select("data")
-          .eq("user_id", session.user.id)
-          .maybeSingle();
-        if (error) throw error;
-        setData(fila && fila.data ? fila.data : datosIniciales());
-      } catch (e) {
-        setData(datosIniciales());
-        setErrorStorage(true);
-      }
-      setCargando(false);
-    })();
-  }, [session.user.id]);
+  const cargarDatos = async () => {
+    setCargando(true);
+    setErrorCarga(false);
+    try {
+      const { data: fila, error } = await sb
+        .from("finanzas")
+        .select("data")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (error) throw error;
+      // Solo usamos datos iniciales si la consulta FUNCIONÓ y confirmó que no hay nada guardado.
+      // Si la consulta falla, NUNCA pisamos tus datos: mostramos error y reintentás.
+      setData(fila && fila.data ? fila.data : datosIniciales());
+    } catch (e) {
+      setErrorCarga(true);
+    }
+    setCargando(false);
+  };
+
+  useEffect(() => { cargarDatos(); }, [session.user.id]);
 
   const guardar = async (nuevo) => {
     setData(nuevo);
@@ -295,25 +363,42 @@ function MisFinanzas({ session }) {
 
   const avisar = (msg) => {
     setAviso(msg);
-    setTimeout(() => setAviso(""), 2200);
+    setTimeout(() => setAviso(""), 2400);
   };
 
   const balances = useMemo(() => {
     if (!data) return {};
     const b = {};
-    data.cuentas.forEach((c) => (b[c.id] = c.inicial || 0));
+    data.cuentas.forEach((c) => { if (c.clase !== "credito") b[c.id] = c.inicial || 0; });
     data.movs.forEach((m) => {
-      if (m.tipo === "ingreso") b[m.cuentaId] = (b[m.cuentaId] || 0) + m.monto;
-      if (m.tipo === "gasto") b[m.cuentaId] = (b[m.cuentaId] || 0) - m.monto;
+      const esNoCredito = (id) => id in b;
+      if (m.tipo === "ingreso" && esNoCredito(m.cuentaId)) b[m.cuentaId] += m.monto;
+      if (m.tipo === "gasto" && esNoCredito(m.cuentaId)) b[m.cuentaId] -= m.monto;
       if (m.tipo === "transfer") {
-        b[m.cuentaId] = (b[m.cuentaId] || 0) - m.monto;
-        b[m.cuentaDestinoId] = (b[m.cuentaDestinoId] || 0) + (m.montoDestino ?? m.monto);
+        if (esNoCredito(m.cuentaId)) b[m.cuentaId] -= m.monto;
+        if (esNoCredito(m.cuentaDestinoId)) b[m.cuentaDestinoId] += (m.montoDestino != null ? m.montoDestino : m.monto);
       }
     });
     return b;
   }, [data]);
 
+  const deudasTarjetas = useMemo(() => (data ? calcularDeudasTarjetas(data) : {}), [data]);
+
   if (cargando) return <PantallaCentrada texto="Abriendo tu cuaderno…" />;
+
+  if (errorCarga) {
+    return (
+      <div style={{ ...S.app, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ ...S.card, maxWidth: 380, textAlign: "center" }}>
+          <div style={{ fontSize: 15, color: C.tinta, fontWeight: 600, marginBottom: 6 }}>No pudimos traer tus datos</div>
+          <div style={{ fontSize: 13.5, color: C.tintaSuave, marginBottom: 14, lineHeight: 1.5 }}>
+            Tranquila: tus datos están a salvo en la nube. Suele ser un tema de conexión.
+          </div>
+          <button style={S.btnPrimario} onClick={cargarDatos}>Reintentar</button>
+        </div>
+      </div>
+    );
+  }
 
   const titulos = { inicio: "Hoy", fijos: "Fijos del mes", resumen: "Resumen", historial: "Historial", cuentas: "Tus cuentas" };
 
@@ -331,11 +416,11 @@ function MisFinanzas({ session }) {
           </div>
         </header>
 
-        {tab === "inicio" && <Inicio data={data} balances={balances} guardar={guardar} avisar={avisar} />}
+        {tab === "inicio" && <Inicio data={data} balances={balances} deudasTarjetas={deudasTarjetas} guardar={guardar} avisar={avisar} />}
         {tab === "fijos" && <Fijos data={data} guardar={guardar} avisar={avisar} />}
         {tab === "resumen" && <Resumen data={data} />}
         {tab === "historial" && <Historial data={data} guardar={guardar} avisar={avisar} />}
-        {tab === "cuentas" && <Cuentas data={data} balances={balances} guardar={guardar} avisar={avisar} />}
+        {tab === "cuentas" && <Cuentas data={data} balances={balances} deudasTarjetas={deudasTarjetas} guardar={guardar} avisar={avisar} />}
 
         <nav style={S.nav}>
           {[["inicio", "Inicio"], ["fijos", "Fijos"], ["resumen", "Resumen"], ["historial", "Historial"], ["cuentas", "Cuentas"]].map(([k, label]) => (
@@ -361,22 +446,23 @@ function MisFinanzas({ session }) {
 }
 
 // ————— Inicio —————
-function Inicio({ data, balances, guardar, avisar }) {
+function Inicio({ data, balances, deudasTarjetas, guardar, avisar }) {
   const totales = useMemo(() => {
     const t = { disponible: { ARS: 0, USD: 0 }, tarjetas: { ARS: 0, USD: 0 } };
     data.cuentas.forEach((c) => {
-      const b = balances[c.id] || 0;
       if (c.clase === "credito") {
-        if (b < 0) t.tarjetas[c.moneda] += -b;
+        const d = deudasTarjetas[c.id] || { ARS: 0, USD: 0 };
+        if (d.ARS > 0) t.tarjetas.ARS += d.ARS;
+        if (d.USD > 0) t.tarjetas.USD += d.USD;
       } else {
-        t.disponible[c.moneda] += b;
+        t.disponible[c.moneda] += balances[c.id] || 0;
       }
     });
     return t;
-  }, [data, balances]);
+  }, [data, balances, deudasTarjetas]);
 
   const mes = mesActual();
-  const fijosPagados = Object.keys(data.pagosFijos[mes] || {}).filter((fid) => data.fijos.some((f) => f.id === fid)).length;
+  const fijosPagados = data.fijos.filter((f) => movQuePagaFijo(data, f, mes)).length;
   const fijosTotal = data.fijos.length;
 
   return (
@@ -398,7 +484,7 @@ function Inicio({ data, balances, guardar, avisar }) {
           <div>
             <div style={{ fontSize: 11, color: "#CFC7E4" }}>Deuda de tarjetas</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#F3D3DD", fontVariantNumeric: "tabular-nums" }}>
-              {totales.tarjetas.ARS === 0 && totales.tarjetas.USD === 0
+              {totales.tarjetas.ARS <= 0 && totales.tarjetas.USD <= 0
                 ? "Al día ✓"
                 : [totales.tarjetas.ARS > 0 && fmt(totales.tarjetas.ARS, "ARS"), totales.tarjetas.USD > 0 && fmt(totales.tarjetas.USD, "USD")].filter(Boolean).join(" · ")}
             </div>
@@ -412,7 +498,7 @@ function Inicio({ data, balances, guardar, avisar }) {
         </div>
       </div>
 
-      <Vencidos data={data} balances={balances} />
+      <Vencidos data={data} deudasTarjetas={deudasTarjetas} />
 
       <CargaRapida data={data} guardar={guardar} avisar={avisar} />
     </div>
@@ -420,28 +506,37 @@ function Inicio({ data, balances, guardar, avisar }) {
 }
 
 // ————— Cartel de vencidos —————
-function Vencidos({ data, balances }) {
+function Vencidos({ data, deudasTarjetas }) {
   const mes = mesActual();
-  const pagosMes = data.pagosFijos[mes] || {};
 
   const fijosVencidos = data.fijos.filter(
-    (f) => f.venceDia && !pagosMes[f.id] && diaHoy() > f.venceDia
+    (f) => f.venceDia && !movQuePagaFijo(data, f, mes) && diaHoy() > f.venceDia
   );
+
+  const tieneDeuda = (id) => {
+    const d = deudasTarjetas[id] || { ARS: 0, USD: 0 };
+    return d.ARS > 0 || d.USD > 0;
+  };
 
   const tarjetasVencidas = data.cuentas.filter(
     (c) =>
       c.clase === "credito" &&
       c.venceDia &&
-      (balances[c.id] || 0) < 0 &&
+      tieneDeuda(c.id) &&
       diaHoy() > c.venceDia &&
       !data.movs.some((m) => m.tipo === "transfer" && m.cuentaDestinoId === c.id && m.fecha.slice(0, 7) === mes)
   );
 
   const proximos = data.fijos.filter(
-    (f) => f.venceDia && !pagosMes[f.id] && diaHoy() <= f.venceDia && f.venceDia - diaHoy() <= 3
+    (f) => f.venceDia && !movQuePagaFijo(data, f, mes) && diaHoy() <= f.venceDia && f.venceDia - diaHoy() <= 3
   );
 
   if (fijosVencidos.length === 0 && tarjetasVencidas.length === 0 && proximos.length === 0) return null;
+
+  const deudaTexto = (id, moneda) => {
+    const d = deudasTarjetas[id] || { ARS: 0, USD: 0 };
+    return [d.ARS > 0 && fmt(d.ARS, "ARS"), d.USD > 0 && fmt(d.USD, "USD")].filter(Boolean).join(" + ");
+  };
 
   return (
     <div style={{ ...S.card, borderLeft: `4px solid ${fijosVencidos.length || tarjetasVencidas.length ? C.gasto : C.ambar}` }}>
@@ -457,7 +552,7 @@ function Vencidos({ data, balances }) {
           ))}
           {tarjetasVencidas.map((c) => (
             <div key={c.id} style={{ fontSize: 13.5, color: C.tinta, marginBottom: 3 }}>
-              <b>{etiquetaCuenta(c)}</b> <span style={{ color: C.gris }}>— venció el {c.venceDia} · debés {fmt(-(balances[c.id] || 0), c.moneda)}</span>
+              <b>{etiquetaCuenta(c)}</b> <span style={{ color: C.gris }}>— venció el {c.venceDia} · debés {deudaTexto(c.id)}</span>
             </div>
           ))}
         </div>
@@ -490,11 +585,17 @@ function CargaRapida({ data, guardar, avisar }) {
   const [nota, setNota] = useState("");
   const [fecha, setFecha] = useState(hoy());
   const [masOpciones, setMasOpciones] = useState(false);
+  const [monedaTarjeta, setMonedaTarjeta] = useState("");
+  const [cuotas, setCuotas] = useState(1);
+  const [cuotasOtro, setCuotasOtro] = useState("");
 
   const cta = data.cuentas.find((c) => c.id === cuentaId);
   const ctaDestino = data.cuentas.find((c) => c.id === cuentaDestinoId);
   const cruzaMoneda = tipo === "transfer" && cta && ctaDestino && cta.moneda !== ctaDestino.moneda;
   const colorTipo = tipo === "gasto" ? C.gasto : tipo === "ingreso" ? C.ingreso : C.transfer;
+  const esTarjeta = cta && cta.clase === "credito";
+  const monedaGasto = esTarjeta ? (monedaTarjeta || cta.moneda) : (cta ? cta.moneda : "ARS");
+  const nCuotas = cuotas === "otro" ? parseInt(cuotasOtro, 10) || 0 : cuotas;
 
   const gruposGasto = data.grupos.filter((g) => g.nombre !== "Ingresos" && g.nombre !== "Tarjetas");
   const catsIngreso = (data.grupos.find((g) => g.nombre === "Ingresos") || { categorias: [] }).categorias;
@@ -504,6 +605,7 @@ function CargaRapida({ data, guardar, avisar }) {
     const m = parseMonto(monto);
     if (isNaN(m) || m <= 0 || !cuentaId) return false;
     if (tipo === "gasto" && !categoria) return false;
+    if (tipo === "gasto" && esTarjeta && nCuotas < 1) return false;
     if (tipo === "transfer") {
       if (!cuentaDestinoId || cuentaDestinoId === cuentaId) return false;
       if (cruzaMoneda && (isNaN(parseMonto(montoDestino)) || parseMonto(montoDestino) <= 0)) return false;
@@ -514,24 +616,52 @@ function CargaRapida({ data, guardar, avisar }) {
   const guardarMov = () => {
     if (!puedeGuardar()) return;
     const m = parseMonto(monto);
-    const mov = {
-      id: uid(),
-      tipo,
-      monto: m,
-      cuentaId,
-      fecha,
-      nota: nota.trim(),
-      grupo: tipo === "gasto" ? grupo : tipo === "ingreso" ? "Ingresos" : "Transferencias",
-      categoria: tipo === "gasto" ? categoria : tipo === "ingreso" ? (categoria || "Otros ingresos") : "Transferencia",
-    };
-    if (tipo === "transfer") {
-      mov.cuentaDestinoId = cuentaDestinoId;
-      if (cruzaMoneda) mov.montoDestino = parseMonto(montoDestino);
+    const nuevosMovs = [];
+
+    if (tipo === "gasto" && esTarjeta && nCuotas > 1) {
+      // Compra en cuotas: un movimiento por mes, cada uno por monto/cuotas
+      const porCuota = Math.round((m / nCuotas) * 100) / 100;
+      let acumulado = 0;
+      for (let i = 1; i <= nCuotas; i++) {
+        const montoCuota = i === nCuotas ? Math.round((m - acumulado) * 100) / 100 : porCuota;
+        acumulado += montoCuota;
+        nuevosMovs.push({
+          id: uid() + i,
+          tipo: "gasto",
+          monto: montoCuota,
+          cuentaId,
+          fecha: sumarMeses(fecha, i - 1),
+          nota: `${nota.trim() ? nota.trim() + " " : ""}(cuota ${i}/${nCuotas})`,
+          grupo,
+          categoria,
+          monedaMov: monedaGasto,
+          cuotasTotal: nCuotas,
+        });
+      }
+    } else {
+      const mov = {
+        id: uid(),
+        tipo,
+        monto: m,
+        cuentaId,
+        fecha,
+        nota: nota.trim(),
+        grupo: tipo === "gasto" ? grupo : tipo === "ingreso" ? "Ingresos" : "Transferencias",
+        categoria: tipo === "gasto" ? categoria : tipo === "ingreso" ? (categoria || "Otros ingresos") : "Transferencia",
+      };
+      if (tipo === "gasto" && esTarjeta) mov.monedaMov = monedaGasto;
+      if (tipo === "transfer") {
+        mov.cuentaDestinoId = cuentaDestinoId;
+        if (cruzaMoneda) mov.montoDestino = parseMonto(montoDestino);
+      }
+      nuevosMovs.push(mov);
     }
-    guardar({ ...data, movs: [mov, ...data.movs] });
-    setMonto(""); setNota(""); setMontoDestino(""); setFecha(hoy());
+
+    guardar({ ...data, movs: [...nuevosMovs, ...data.movs] });
+    setMonto(""); setNota(""); setMontoDestino(""); setFecha(hoy()); setCuotas(1); setCuotasOtro("");
     avisar(
-      tipo === "gasto" ? `Gasto de ${fmt(m, cta.moneda)} anotado ✓`
+      tipo === "gasto" && esTarjeta && nCuotas > 1 ? `${fmt(m, monedaGasto)} en ${nCuotas} cuotas anotado ✓`
+      : tipo === "gasto" ? `Gasto de ${fmt(m, monedaGasto)} anotado ✓`
       : tipo === "ingreso" ? `Ingreso de ${fmt(m, cta.moneda)} anotado ✓`
       : "Movimiento entre cajas anotado ✓"
     );
@@ -570,18 +700,51 @@ function CargaRapida({ data, guardar, avisar }) {
       </label>
       <div style={S.chips}>
         {data.cuentas.map((c) => (
-          <Chip key={c.id} activo={cuentaId === c.id} onClick={() => setCuentaId(c.id)}>
+          <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => { setCuentaId(c.id); setMonedaTarjeta(""); setCuotas(1); }}>
             {etiquetaCuenta(c)}
           </Chip>
         ))}
       </div>
+
+      {tipo === "gasto" && esTarjeta && (
+        <React.Fragment>
+          <label style={S.label}>¿En qué moneda es el consumo?</label>
+          <div style={S.chips}>
+            <Chip activo={monedaGasto === "ARS"} onClick={() => setMonedaTarjeta("ARS")}>Pesos</Chip>
+            <Chip activo={monedaGasto === "USD"} onClick={() => setMonedaTarjeta("USD")}>Dólares</Chip>
+          </div>
+          <label style={S.label}>¿En cuotas?</label>
+          <div style={S.chips}>
+            {[1, 3, 6, 12].map((n) => (
+              <Chip key={n} activo={cuotas === n} onClick={() => { setCuotas(n); setCuotasOtro(""); }}>
+                {n === 1 ? "Un pago" : `${n} cuotas`}
+              </Chip>
+            ))}
+            <Chip activo={cuotas === "otro"} onClick={() => setCuotas("otro")}>Otra cantidad</Chip>
+          </div>
+          {cuotas === "otro" && (
+            <input
+              style={{ ...S.input, marginTop: 6 }}
+              inputMode="numeric"
+              placeholder="¿Cuántas cuotas?"
+              value={cuotasOtro}
+              onChange={(e) => setCuotasOtro(e.target.value)}
+            />
+          )}
+          {nCuotas > 1 && parseMonto(monto) > 0 && (
+            <div style={{ fontSize: 12.5, color: C.tintaSuave, marginTop: 2 }}>
+              El total se divide: {fmt(Math.round((parseMonto(monto) / nCuotas) * 100) / 100, monedaGasto)} por mes durante {nCuotas} meses, empezando este mes.
+            </div>
+          )}
+        </React.Fragment>
+      )}
 
       {tipo === "transfer" && (
         <React.Fragment>
           <label style={S.label}>Hacia</label>
           <div style={S.chips}>
             {data.cuentas.filter((c) => c.id !== cuentaId).map((c) => (
-              <Chip key={c.id} activo={cuentaDestinoId === c.id} onClick={() => setCuentaDestinoId(c.id)}>
+              <Chip key={c.id} activo={cuentaDestinoId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaDestinoId(c.id)}>
                 {etiquetaCuenta(c)}
               </Chip>
             ))}
@@ -662,9 +825,9 @@ function CargaRapida({ data, guardar, avisar }) {
         Anotar
       </button>
 
-      {cta && cta.clase === "credito" && tipo === "gasto" && (
+      {esTarjeta && tipo === "gasto" && (
         <div style={{ fontSize: 12.5, color: C.tintaSuave, marginTop: 8, lineHeight: 1.5 }}>
-          Este gasto suma a la deuda de la tarjeta. Cuando pagues el resumen, registralo desde Cuentas → "Pagar tarjeta".
+          Este consumo suma a la deuda de la tarjeta en la moneda que elegiste. Cuando pagues el resumen, registralo desde Cuentas → "Pagar tarjeta".
         </div>
       )}
     </div>
@@ -687,11 +850,15 @@ function Fijos({ data, guardar, avisar }) {
   const [efGrupo, setEfGrupo] = useState("");
   const [efVence, setEfVence] = useState("");
   const [efDatos, setEfDatos] = useState("");
+  const [verPagados, setVerPagados] = useState(false);
 
   const pagosMes = data.pagosFijos[mes] || {};
-  const movPorId = (id) => data.movs.find((m) => m.id === id);
-  const gruposConFijos = [...new Set(data.fijos.map((f) => f.grupo))];
   const gruposElegibles = data.grupos.filter((g) => g.nombre !== "Ingresos" && g.nombre !== "Tarjetas");
+
+  const fijosConEstado = data.fijos.map((f) => ({ fijo: f, mov: movQuePagaFijo(data, f, mes) }));
+  const pendientes = fijosConEstado.filter((x) => !x.mov);
+  const pagadosLista = fijosConEstado.filter((x) => x.mov);
+  const gruposPendientes = [...new Set(pendientes.map((x) => x.fijo.grupo))];
 
   const pagar = (fijo) => {
     const m = parseMonto(monto);
@@ -707,6 +874,8 @@ function Fijos({ data, guardar, avisar }) {
       nota: "",
       fijoId: fijo.id,
     };
+    const cta = data.cuentas.find((c) => c.id === cuentaId);
+    if (cta && cta.clase === "credito") mov.monedaMov = cta.moneda;
     guardar({
       ...data,
       movs: [mov, ...data.movs],
@@ -716,13 +885,12 @@ function Fijos({ data, guardar, avisar }) {
     avisar(`${fijo.categoria} pagado ✓`);
   };
 
-  const deshacer = (fijo) => {
-    const movId = pagosMes[fijo.id];
+  const deshacer = (fijo, mov) => {
     const nuevosPagos = { ...pagosMes };
     delete nuevosPagos[fijo.id];
     guardar({
       ...data,
-      movs: data.movs.filter((m) => m.id !== movId),
+      movs: data.movs.filter((m) => m.id !== mov.id),
       pagosFijos: { ...data.pagosFijos, [mes]: nuevosPagos },
     });
     avisar("Pago deshecho — balance actualizado");
@@ -774,17 +942,11 @@ function Fijos({ data, guardar, avisar }) {
     avisar(`"${fijo.categoria}" quitado de los fijos (su historial se conserva)`);
   };
 
-  const totalPagado = data.fijos.reduce((acc, f) => {
-    const mov = pagosMes[f.id] && movPorId(pagosMes[f.id]);
-    if (mov) {
-      const cta = data.cuentas.find((c) => c.id === mov.cuentaId);
-      const mon = cta ? cta.moneda : "ARS";
-      acc[mon] = (acc[mon] || 0) + mov.monto;
-    }
+  const totalPagado = pagadosLista.reduce((acc, x) => {
+    const mon = monedaDelMov(x.mov, data.cuentas);
+    acc[mon] = (acc[mon] || 0) + x.mov.monto;
     return acc;
   }, {});
-
-  const pagados = data.fijos.filter((f) => pagosMes[f.id]).length;
 
   return (
     <div style={{ paddingBottom: 90 }}>
@@ -793,8 +955,8 @@ function Fijos({ data, guardar, avisar }) {
       <div style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 13, color: C.tintaSuave }}>Pagados este mes</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: pagados === data.fijos.length ? C.lav : C.tinta }}>
-            {pagados} de {data.fijos.length}
+          <div style={{ fontSize: 20, fontWeight: 800, color: pagadosLista.length === data.fijos.length ? C.lav : C.tinta }}>
+            {pagadosLista.length} de {data.fijos.length}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
@@ -805,37 +967,30 @@ function Fijos({ data, guardar, avisar }) {
         </div>
       </div>
 
-      {gruposConFijos.map((g) => (
+      {pendientes.length === 0 && (
+        <div style={S.vacio}>¡Todos los fijos de {nombreMes(mes).toLowerCase()} están pagados! 🎉</div>
+      )}
+
+      {gruposPendientes.map((g) => (
         <div key={g} style={{ marginBottom: 16 }}>
           <div style={S.fechaHeader}>{g}</div>
-          {data.fijos.filter((f) => f.grupo === g).map((f) => {
-            const movId = pagosMes[f.id];
-            const mov = movId && movPorId(movId);
-            const pagado = !!mov;
+          {pendientes.filter((x) => x.fijo.grupo === g).map(({ fijo: f }) => {
             const enEdicion = editandoFijo === f.id;
             return (
-              <div key={f.id} style={{ ...S.movFila, borderLeft: `3px solid ${pagado ? C.lav : C.ambar}` }}>
+              <div key={f.id} style={{ ...S.movFila, borderLeft: `3px solid ${C.ambar}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 600, color: C.tinta, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {f.categoria}
-                    {!pagado && f.venceDia && (mes < mesActual() || (mes === mesActual() && diaHoy() > f.venceDia)) && (
+                    {f.venceDia && (mes < mesActual() || (mes === mesActual() && diaHoy() > f.venceDia)) && (
                       <span style={S.badgeVencido}>VENCIDO</span>
                     )}
                   </div>
                   {f.datos && <div style={{ fontSize: 12, color: C.gris }}>{f.datos}</div>}
-                  {pagado ? (
-                    <div style={{ fontSize: 12.5, color: C.lav }}>
-                      Pagado · {fmt(mov.monto, (data.cuentas.find((c) => c.id === mov.cuentaId) || {}).moneda || "ARS")} · {(data.cuentas.find((c) => c.id === mov.cuentaId) || {}).entidad || ""}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 12.5, color: C.ambar }}>
-                      Pendiente{f.venceDia ? ` · vence el ${f.venceDia}` : ""}
-                    </div>
-                  )}
+                  <div style={{ fontSize: 12.5, color: C.ambar }}>
+                    Pendiente{f.venceDia ? ` · vence el ${f.venceDia}` : ""}
+                  </div>
                 </div>
-                {pagado ? (
-                  <button style={S.btnMini} onClick={() => deshacer(f)}>deshacer</button>
-                ) : pagando === f.id || enEdicion ? null : (
+                {pagando === f.id || enEdicion ? null : (
                   <div style={{ display: "flex", gap: 6 }}>
                     <button style={{ ...S.btnSecundario, padding: "7px 14px", fontSize: 13 }} onClick={() => { setPagando(f.id); setMonto(""); setCuentaId(""); }}>
                       Pagar
@@ -866,7 +1021,7 @@ function Fijos({ data, guardar, avisar }) {
                   </div>
                 )}
 
-                {pagando === f.id && !pagado && (
+                {pagando === f.id && (
                   <div style={{ width: "100%", marginTop: 8 }}>
                     <input
                       style={S.input}
@@ -879,7 +1034,7 @@ function Fijos({ data, guardar, avisar }) {
                     <label style={{ ...S.label, marginTop: 0 }}>¿De dónde sale?</label>
                     <div style={S.chips}>
                       {data.cuentas.map((c) => (
-                        <Chip key={c.id} activo={cuentaId === c.id} onClick={() => setCuentaId(c.id)}>
+                        <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaId(c.id)}>
                           {etiquetaCuenta(c)}
                         </Chip>
                       ))}
@@ -901,6 +1056,28 @@ function Fijos({ data, guardar, avisar }) {
           })}
         </div>
       ))}
+
+      {pagadosLista.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <button style={{ ...S.acordeonHeader, background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 12 }} onClick={() => setVerPagados(!verPagados)}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.lav }}>
+              <span style={{ marginRight: 8, fontSize: 13 }}>{verPagados ? "▾" : "▸"}</span>
+              ✓ Ya pagados este mes ({pagadosLista.length})
+            </span>
+          </button>
+          {verPagados && pagadosLista.map(({ fijo: f, mov }) => (
+            <div key={f.id} style={{ ...S.movFila, borderLeft: `3px solid ${C.lav}`, marginTop: 8, opacity: 0.85 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tinta }}>{f.categoria}</div>
+                <div style={{ fontSize: 12.5, color: C.lav }}>
+                  Pagado · {fmt(mov.monto, monedaDelMov(mov, data.cuentas))} · {etiquetaCuenta(data.cuentas.find((c) => c.id === mov.cuentaId))}
+                </div>
+              </div>
+              <button style={S.btnMini} onClick={() => deshacer(f, mov)}>deshacer</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {nuevoFijo ? (
         <div style={S.card}>
@@ -936,12 +1113,11 @@ function Resumen({ data }) {
   const toggle = (k) => setAbiertos((a) => ({ ...a, [k]: !a[k] }));
 
   const movsMes = data.movs.filter((m) => m.fecha.slice(0, 7) === mes);
-  const monedaDe = (m) => (data.cuentas.find((c) => c.id === m.cuentaId) || {}).moneda || "ARS";
   const nombreCta = (id) => etiquetaCuenta(data.cuentas.find((x) => x.id === id));
 
   const suma = (movs) =>
     movs.reduce((acc, m) => {
-      const mon = monedaDe(m);
+      const mon = monedaDelMov(m, data.cuentas);
       acc[mon] = (acc[mon] || 0) + m.monto;
       return acc;
     }, {});
@@ -1022,7 +1198,7 @@ function Resumen({ data }) {
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 10 }}>
                             {fmtFecha(m.fecha)} · {nombreCta(m.cuentaId)}{m.nota ? ` · ${m.nota}` : ""}
                           </span>
-                          <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmt(m.monto, monedaDe(m))}</span>
+                          <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmt(m.monto, monedaDelMov(m, data.cuentas))}</span>
                         </div>
                       ))}
                     </div>
@@ -1044,10 +1220,10 @@ function Resumen({ data }) {
             const abierto = abiertos[k];
             if (consumos.length === 0 && pagos.length === 0) return null;
             return (
-              <div key={t.id} style={{ ...S.card, padding: 0, overflow: "hidden" }}>
+              <div key={t.id} style={{ ...S.card, padding: 0, overflow: "hidden", borderLeft: `4px solid ${colorEntidad(t.entidad)}` }}>
                 <button style={S.acordeonHeader} onClick={() => toggle(k)}>
                   <span style={{ fontSize: 14.5, fontWeight: 700, color: C.tinta }}>
-                    <span style={{ color: C.lav, marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
+                    <span style={{ color: colorEntidad(t.entidad), marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
                     {t.entidad} · {t.nombre}
                   </span>
                   <span style={{ fontSize: 13, color: C.gris }}>
@@ -1060,7 +1236,7 @@ function Resumen({ data }) {
                       Consumos: <b style={{ color: C.gasto }}>{fmtSuma(suma(consumos))}</b>
                     </div>
                     <div style={{ fontSize: 13, color: C.tintaSuave }}>
-                      Pagos hechos: <b style={{ color: C.ingreso }}>{pagos.length === 0 ? "—" : pagos.map((p) => `${fmt(p.monto, monedaDe(p))} desde ${nombreCta(p.cuentaId)}`).join(" · ")}</b>
+                      Pagos hechos: <b style={{ color: C.ingreso }}>{pagos.length === 0 ? "—" : pagos.map((p) => `${fmt(p.monto, (data.cuentas.find((c) => c.id === p.cuentaId) || {}).moneda || "ARS")} desde ${nombreCta(p.cuentaId)}`).join(" · ")}</b>
                     </div>
                   </div>
                 )}
@@ -1095,7 +1271,6 @@ function Historial({ data, guardar, avisar }) {
 
   const movs = data.movs.filter((m) => !filtroCuenta || m.cuentaId === filtroCuenta || m.cuentaDestinoId === filtroCuenta);
   const nombreCta = (id) => etiquetaCuenta(data.cuentas.find((x) => x.id === id));
-  const monedaCta = (id) => (data.cuentas.find((c) => c.id === id) || {}).moneda || "ARS";
 
   const borrar = (id) => {
     const nuevosPagosFijos = {};
@@ -1117,7 +1292,7 @@ function Historial({ data, guardar, avisar }) {
       <div style={{ ...S.chips, marginBottom: 16 }}>
         <Chip activo={!filtroCuenta} onClick={() => setFiltroCuenta("")}>Todas</Chip>
         {data.cuentas.map((c) => (
-          <Chip key={c.id} activo={filtroCuenta === c.id} onClick={() => setFiltroCuenta(c.id)}>
+          <Chip key={c.id} activo={filtroCuenta === c.id} dot={colorEntidad(c.entidad)} onClick={() => setFiltroCuenta(c.id)}>
             {etiquetaCuenta(c)}
           </Chip>
         ))}
@@ -1128,40 +1303,43 @@ function Historial({ data, guardar, avisar }) {
       {fechas.map((f) => (
         <div key={f} style={{ marginBottom: 18 }}>
           <div style={S.fechaHeader}>{fmtFecha(f)}</div>
-          {porFecha[f].map((m) => (
-            <div key={m.id} style={S.movFila}>
-              <div style={{
-                width: 4, alignSelf: "stretch", borderRadius: 2,
-                background: m.tipo === "gasto" ? C.gasto : m.tipo === "ingreso" ? C.ingreso : C.transfer,
-              }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 600, color: C.tinta, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {m.nota || m.categoria}
-                </div>
-                <div style={{ fontSize: 12.5, color: C.tintaSuave, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {m.tipo === "transfer"
-                    ? `${nombreCta(m.cuentaId)} → ${nombreCta(m.cuentaDestinoId)}`
-                    : `${m.grupo ? m.grupo + " · " : ""}${m.categoria} · ${nombreCta(m.cuentaId)}`}
-                </div>
-              </div>
-              <div style={{ textAlign: "right", flexShrink: 0 }}>
+          {porFecha[f].map((m) => {
+            const ctaMov = data.cuentas.find((c) => c.id === m.cuentaId);
+            return (
+              <div key={m.id} style={S.movFila}>
                 <div style={{
-                  fontSize: 14.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                  color: m.tipo === "gasto" ? C.gasto : m.tipo === "ingreso" ? C.ingreso : C.transfer,
-                }}>
-                  {m.tipo === "gasto" ? "−" : m.tipo === "ingreso" ? "+" : ""}{fmt(m.monto, monedaCta(m.cuentaId))}
-                </div>
-                {confirmar === m.id ? (
-                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 2 }}>
-                    <button style={{ ...S.btnMini, color: C.gasto }} onClick={() => borrar(m.id)}>Sí, borrar</button>
-                    <button style={S.btnMini} onClick={() => setConfirmar(null)}>No</button>
+                  width: 4, alignSelf: "stretch", borderRadius: 2,
+                  background: ctaMov ? colorEntidad(ctaMov.entidad) : C.gris,
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, color: C.tinta, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.nota || m.categoria}
                   </div>
-                ) : (
-                  <button style={S.btnMini} onClick={() => setConfirmar(m.id)}>borrar</button>
-                )}
+                  <div style={{ fontSize: 12.5, color: C.tintaSuave, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.tipo === "transfer"
+                      ? `${nombreCta(m.cuentaId)} → ${nombreCta(m.cuentaDestinoId)}`
+                      : `${m.grupo ? m.grupo + " · " : ""}${m.categoria} · ${nombreCta(m.cuentaId)}`}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{
+                    fontSize: 14.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                    color: m.tipo === "gasto" ? C.gasto : m.tipo === "ingreso" ? C.ingreso : C.transfer,
+                  }}>
+                    {m.tipo === "gasto" ? "−" : m.tipo === "ingreso" ? "+" : ""}{fmt(m.monto, monedaDelMov(m, data.cuentas))}
+                  </div>
+                  {confirmar === m.id ? (
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 2 }}>
+                      <button style={{ ...S.btnMini, color: C.gasto }} onClick={() => borrar(m.id)}>Sí, borrar</button>
+                      <button style={S.btnMini} onClick={() => setConfirmar(null)}>No</button>
+                    </div>
+                  ) : (
+                    <button style={S.btnMini} onClick={() => setConfirmar(m.id)}>borrar</button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ))}
     </div>
@@ -1169,7 +1347,7 @@ function Historial({ data, guardar, avisar }) {
 }
 
 // ————— Cuentas —————
-function Cuentas({ data, balances, guardar, avisar }) {
+function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
   const [editando, setEditando] = useState(null);
   const [pagandoTarjeta, setPagandoTarjeta] = useState(null);
   const [mostrarNueva, setMostrarNueva] = useState(false);
@@ -1180,82 +1358,111 @@ function Cuentas({ data, balances, guardar, avisar }) {
 
   return (
     <div style={{ paddingBottom: 90 }}>
-      {entidades.map((ent) => (
-        <div key={ent} style={{ marginBottom: 18 }}>
-          <div style={S.fechaHeader}>{ent}</div>
-          {data.cuentas.filter((c) => c.entidad === ent).map((c) => {
-            const b = balances[c.id] || 0;
-            const esTarjeta = c.clase === "credito";
-            return (
-              <div key={c.id} style={{ ...S.movFila, flexDirection: "column", alignItems: "stretch", gap: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: C.tinta, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      {c.nombre}
-                      {esTarjeta && c.venceDia && b < 0 && diaHoy() > c.venceDia && !pagadaEsteMes(c.id) && (
-                        <span style={S.badgeVencido}>VENCIDO</span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 12.5, color: C.tintaSuave }}>{CLASES[c.clase]} · {c.moneda === "USD" ? "Dólares" : "Pesos"}</div>
-                    {esTarjeta && (c.cierreDia || c.venceDia) && (
-                      <div style={{ fontSize: 12, color: C.gris }}>
-                        {c.cierreDia ? `Cierra el ${c.cierreDia}` : ""}{c.cierreDia && c.venceDia ? " · " : ""}{c.venceDia ? `Vence el ${c.venceDia}` : ""}
+      {entidades.map((ent) => {
+        const col = colorEntidad(ent);
+        return (
+          <div key={ent} style={{ marginBottom: 18 }}>
+            <div style={{ ...S.fechaHeader, display: "flex", alignItems: "center", gap: 7, color: col }}>
+              <span style={{ width: 10, height: 10, borderRadius: 5, background: col, display: "inline-block" }} />
+              {ent}
+            </div>
+            {data.cuentas.filter((c) => c.entidad === ent).map((c) => {
+              const esTarjeta = c.clase === "credito";
+              const d = deudasTarjetas[c.id] || { ARS: 0, USD: 0 };
+              const conDeuda = esTarjeta && (d.ARS > 0 || d.USD > 0);
+              const pagada = esTarjeta && pagadaEsteMes(c.id);
+              const vencida = esTarjeta && c.venceDia && conDeuda && diaHoy() > c.venceDia && !pagada;
+              return (
+                <div key={c.id} style={{ ...S.movFila, flexDirection: "column", alignItems: "stretch", gap: 0, borderLeft: `4px solid ${col}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: C.tinta, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {c.nombre}
+                        {vencida && <span style={S.badgeVencido}>VENCIDO</span>}
                       </div>
-                    )}
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{
-                      fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                      color: esTarjeta && b < 0 ? C.gasto : C.tinta,
-                    }}>
-                      {esTarjeta && b < 0 ? `Debés ${fmt(-b, c.moneda)}` : fmt(b, c.moneda)}
+                      <div style={{ fontSize: 12.5, color: C.tintaSuave }}>{CLASES[c.clase]} · {c.moneda === "USD" ? "Dólares" : "Pesos"}</div>
                     </div>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button style={S.btnMini} onClick={() => setEditando(editando === c.id ? null : c.id)}>editar</button>
-                      {esTarjeta && (
-                        <button style={{ ...S.btnMini, color: C.lav, fontWeight: 700 }} onClick={() => setPagandoTarjeta(pagandoTarjeta === c.id ? null : c.id)}>
-                          Pagar tarjeta
-                        </button>
+                    <div style={{ textAlign: "right" }}>
+                      {esTarjeta ? (
+                        <div style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: conDeuda ? C.gasto : C.tinta }}>
+                          {!conDeuda
+                            ? "Sin deuda ✓"
+                            : [d.ARS > 0 && `Debés ${fmt(d.ARS, "ARS")}`, d.USD > 0 && `Debés ${fmt(d.USD, "USD")}`].filter(Boolean).join(" · ")}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: C.tinta }}>
+                          {fmt(balances[c.id] || 0, c.moneda)}
+                        </div>
                       )}
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                        <button style={S.btnMini} onClick={() => setEditando(editando === c.id ? null : c.id)}>editar</button>
+                        {esTarjeta && (
+                          <button style={{ ...S.btnMini, color: C.lav, fontWeight: 700 }} onClick={() => setPagandoTarjeta(pagandoTarjeta === c.id ? null : c.id)}>
+                            Pagar tarjeta
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
+
+                  {esTarjeta && (
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${C.linea}` }}>
+                      {c.cierreDia && (
+                        <MiniDato titulo="Cierra" valor={diasHastaDia(c.cierreDia) === 0 ? "¡Hoy!" : `en ${diasHastaDia(c.cierreDia)} días (el ${c.cierreDia})`} />
+                      )}
+                      {c.venceDia && (
+                        <MiniDato titulo="Vence" valor={`el ${c.venceDia}`} color={vencida ? C.gasto : undefined} />
+                      )}
+                      <MiniDato
+                        titulo="Este mes"
+                        valor={pagada ? "Pagada ✓" : conDeuda ? "Sin pagar" : "Sin deuda"}
+                        color={pagada ? C.ingreso : conDeuda ? C.ambar : C.ingreso}
+                      />
+                      <MiniDato
+                        titulo="Acumulado"
+                        valor={!conDeuda ? "—" : [d.ARS > 0 && fmt(d.ARS, "ARS"), d.USD > 0 && fmt(d.USD, "USD")].filter(Boolean).join(" + ")}
+                        color={conDeuda ? C.gasto : undefined}
+                      />
+                    </div>
+                  )}
+
+                  {editando === c.id && (
+                    <EditarCuenta
+                      cuenta={c}
+                      tieneMovs={data.movs.some((m) => m.cuentaId === c.id || m.cuentaDestinoId === c.id)}
+                      onGuardar={(cambios) => {
+                        guardar({ ...data, cuentas: data.cuentas.map((x) => (x.id === c.id ? { ...x, ...cambios } : x)) });
+                        setEditando(null);
+                        avisar("Cuenta actualizada");
+                      }}
+                      onBorrar={() => {
+                        guardar({ ...data, cuentas: data.cuentas.filter((x) => x.id !== c.id) });
+                        setEditando(null);
+                        avisar("Cuenta eliminada");
+                      }}
+                      onCancelar={() => setEditando(null)}
+                    />
+                  )}
+
+                  {pagandoTarjeta === c.id && (
+                    <PagarTarjeta
+                      tarjeta={c}
+                      data={data}
+                      deuda={d}
+                      onPagar={(mov) => {
+                        guardar({ ...data, movs: [mov, ...data.movs] });
+                        setPagandoTarjeta(null);
+                        avisar("Pago de tarjeta anotado ✓");
+                      }}
+                      onCancelar={() => setPagandoTarjeta(null)}
+                    />
+                  )}
                 </div>
-
-                {editando === c.id && (
-                  <EditarCuenta
-                    cuenta={c}
-                    tieneMovs={data.movs.some((m) => m.cuentaId === c.id || m.cuentaDestinoId === c.id)}
-                    onGuardar={(cambios) => {
-                      guardar({ ...data, cuentas: data.cuentas.map((x) => (x.id === c.id ? { ...x, ...cambios } : x)) });
-                      setEditando(null);
-                      avisar("Cuenta actualizada");
-                    }}
-                    onBorrar={() => {
-                      guardar({ ...data, cuentas: data.cuentas.filter((x) => x.id !== c.id) });
-                      setEditando(null);
-                      avisar("Cuenta eliminada");
-                    }}
-                    onCancelar={() => setEditando(null)}
-                  />
-                )}
-
-                {pagandoTarjeta === c.id && (
-                  <PagarTarjeta
-                    tarjeta={c}
-                    data={data}
-                    onPagar={(mov) => {
-                      guardar({ ...data, movs: [mov, ...data.movs] });
-                      setPagandoTarjeta(null);
-                      avisar("Pago de tarjeta anotado ✓");
-                    }}
-                    onCancelar={() => setPagandoTarjeta(null)}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+              );
+            })}
+          </div>
+        );
+      })}
 
       {mostrarNueva ? (
         <NuevaCuenta
@@ -1273,6 +1480,15 @@ function Cuentas({ data, balances, guardar, avisar }) {
       <GruposYCategorias data={data} guardar={guardar} avisar={avisar} />
       <SeccionDeudas data={data} guardar={guardar} avisar={avisar} />
       <Respaldo data={data} guardar={guardar} avisar={avisar} />
+    </div>
+  );
+}
+
+function MiniDato({ titulo, valor, color }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.gris }}>{titulo}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: color || C.tinta, fontVariantNumeric: "tabular-nums" }}>{valor}</div>
     </div>
   );
 }
@@ -1298,14 +1514,14 @@ function EditarCuenta({ cuenta, tieneMovs, onGuardar, onBorrar, onCancelar }) {
           <Chip key={k} activo={clase === k} onClick={() => !tieneMovs && setClase(k)}>{label}</Chip>
         ))}
       </div>
-      <label style={S.label}>Moneda</label>
+      <label style={S.label}>Moneda {clase === "credito" ? "(principal de la tarjeta)" : ""}</label>
       <div style={S.chips}>
         <Chip activo={moneda === "ARS"} onClick={() => !tieneMovs && setMoneda("ARS")}>Pesos</Chip>
         <Chip activo={moneda === "USD"} onClick={() => !tieneMovs && setMoneda("USD")}>Dólares</Chip>
       </div>
       {tieneMovs && (
         <div style={{ fontSize: 12, color: C.gris, marginBottom: 8 }}>
-          El tipo y la moneda no se pueden cambiar porque la cuenta ya tiene movimientos (se romperían los balances). El nombre y la entidad sí.
+          El tipo y la moneda no se pueden cambiar porque la cuenta ya tiene movimientos. El nombre y la entidad sí. Y recordá: en las tarjetas, cada consumo puede ser en pesos o en dólares — se elige al cargarlo.
         </div>
       )}
       {clase === "credito" && (
@@ -1351,13 +1567,14 @@ function EditarCuenta({ cuenta, tieneMovs, onGuardar, onBorrar, onCancelar }) {
   );
 }
 
-function PagarTarjeta({ tarjeta, data, onPagar, onCancelar }) {
+function PagarTarjeta({ tarjeta, data, deuda, onPagar, onCancelar }) {
+  const [monedaParte, setMonedaParte] = useState(deuda && deuda.USD > 0 && deuda.ARS <= 0 ? "USD" : tarjeta.moneda);
   const [monto, setMonto] = useState("");
   const [cuentaId, setCuentaId] = useState("");
   const [montoDestino, setMontoDestino] = useState("");
 
   const origen = data.cuentas.find((c) => c.id === cuentaId);
-  const cruzaMoneda = origen && origen.moneda !== tarjeta.moneda;
+  const cruzaMoneda = origen && origen.moneda !== monedaParte;
 
   const listo = () => {
     const m = parseMonto(monto);
@@ -1368,19 +1585,29 @@ function PagarTarjeta({ tarjeta, data, onPagar, onCancelar }) {
 
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.linea}` }}>
-      <label style={{ ...S.label, marginTop: 0 }}>¿Cuánto pagás{cruzaMoneda ? ` (en ${origen.moneda === "USD" ? "dólares" : "pesos"})` : ""}?</label>
+      {deuda && deuda.ARS > 0 && deuda.USD > 0 && (
+        <div style={{ fontSize: 12.5, color: C.tintaSuave, marginBottom: 6 }}>
+          Esta tarjeta tiene deuda en pesos y en dólares. Registrá cada parte por separado.
+        </div>
+      )}
+      <label style={{ ...S.label, marginTop: 0 }}>¿Qué parte del resumen pagás?</label>
+      <div style={S.chips}>
+        <Chip activo={monedaParte === "ARS"} onClick={() => setMonedaParte("ARS")}>La parte en pesos{deuda && deuda.ARS > 0 ? ` (${fmt(deuda.ARS, "ARS")})` : ""}</Chip>
+        <Chip activo={monedaParte === "USD"} onClick={() => setMonedaParte("USD")}>La parte en dólares{deuda && deuda.USD > 0 ? ` (${fmt(deuda.USD, "USD")})` : ""}</Chip>
+      </div>
+      <label style={{ ...S.label, marginTop: 0 }}>¿Cuánto sale de tu cuenta{origen ? ` (en ${origen.moneda === "USD" ? "dólares" : "pesos"})` : ""}?</label>
       <input style={S.input} inputMode="decimal" placeholder="Monto del pago" value={monto} onChange={(e) => setMonto(e.target.value)} autoFocus />
       <label style={{ ...S.label, marginTop: 0 }}>¿De dónde sale el dinero?</label>
       <div style={S.chips}>
         {data.cuentas.filter((c) => c.id !== tarjeta.id && c.clase !== "credito").map((c) => (
-          <Chip key={c.id} activo={cuentaId === c.id} onClick={() => setCuentaId(c.id)}>
+          <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaId(c.id)}>
             {etiquetaCuenta(c)}
           </Chip>
         ))}
       </div>
       {cruzaMoneda && (
         <React.Fragment>
-          <label style={S.label}>¿Cuánto se acredita a la tarjeta en {tarjeta.moneda === "USD" ? "dólares" : "pesos"}?</label>
+          <label style={S.label}>¿Cuánto se acredita a la tarjeta en {monedaParte === "USD" ? "dólares" : "pesos"}?</label>
           <input style={S.input} inputMode="decimal" value={montoDestino} onChange={(e) => setMontoDestino(e.target.value)} />
         </React.Fragment>
       )}
@@ -1398,7 +1625,8 @@ function PagarTarjeta({ tarjeta, data, onPagar, onCancelar }) {
               fecha: hoy(),
               grupo: "Tarjetas",
               categoria: "Pago de tarjeta",
-              nota: `Pago tarjeta ${tarjeta.entidad}`,
+              nota: `Pago tarjeta ${tarjeta.entidad} (parte ${monedaParte === "USD" ? "USD" : "$"})`,
+              monedaPagoTarjeta: monedaParte,
             };
             if (cruzaMoneda) mov.montoDestino = parseMonto(montoDestino);
             onPagar(mov);
@@ -1424,7 +1652,7 @@ function NuevaCuenta({ onCrear, onCancelar }) {
       <label style={{ ...S.label, marginTop: 0 }}>Banco o entidad</label>
       <input style={S.input} placeholder="Ej: Banco Nación, Ualá…" value={entidad} onChange={(e) => setEntidad(e.target.value)} />
       <label style={{ ...S.label, marginTop: 0 }}>Nombre de la cuenta</label>
-      <input style={S.input} placeholder="Ej: Tarjeta USD" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+      <input style={S.input} placeholder="Ej: Caja de ahorro $" value={nombre} onChange={(e) => setNombre(e.target.value)} />
       <label style={{ ...S.label, marginTop: 0 }}>Tipo</label>
       <div style={S.chips}>
         {Object.entries(CLASES).map(([k, label]) => (
@@ -1682,7 +1910,7 @@ function SeccionDeudas({ data, guardar, avisar }) {
               <label style={{ ...S.label, marginTop: 0 }}>{d.direccion === "me_deben" ? "¿A qué cuenta entra?" : "¿De qué cuenta sale?"}</label>
               <div style={S.chips}>
                 {cuentasCompatibles(d.moneda).map((c) => (
-                  <Chip key={c.id} onClick={() => saldar(d, c.id)}>{etiquetaCuenta(c)}</Chip>
+                  <Chip key={c.id} dot={colorEntidad(c.entidad)} onClick={() => saldar(d, c.id)}>{etiquetaCuenta(c)}</Chip>
                 ))}
               </div>
               <button style={S.btnFantasma} onClick={() => setSaldando(null)}>Cancelar</button>
@@ -1774,7 +2002,7 @@ function Respaldo({ data, guardar, avisar }) {
 }
 
 // ————— Piezas —————
-function Chip({ activo, onClick, children }) {
+function Chip({ activo, onClick, dot, children }) {
   return (
     <button
       onClick={onClick}
@@ -1784,8 +2012,12 @@ function Chip({ activo, onClick, children }) {
         color: activo ? "#fff" : C.tinta,
         borderColor: activo ? C.lav : C.linea,
         fontWeight: activo ? 700 : 500,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
       }}
     >
+      {dot && <span style={{ width: 8, height: 8, borderRadius: 4, background: activo ? "#fff" : dot, display: "inline-block", flexShrink: 0 }} />}
       {children}
     </button>
   );
