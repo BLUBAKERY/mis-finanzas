@@ -1268,9 +1268,16 @@ function SelectorMes({ mes, setMes }) {
 function Historial({ data, guardar, avisar }) {
   const [filtroCuenta, setFiltroCuenta] = useState("");
   const [confirmar, setConfirmar] = useState(null);
+  const [editando, setEditando] = useState(null);
 
   const movs = data.movs.filter((m) => !filtroCuenta || m.cuentaId === filtroCuenta || m.cuentaDestinoId === filtroCuenta);
   const nombreCta = (id) => etiquetaCuenta(data.cuentas.find((x) => x.id === id));
+
+  const guardarEdicion = (id, cambios) => {
+    guardar({ ...data, movs: data.movs.map((m) => (m.id === id ? { ...m, ...cambios } : m)) });
+    setEditando(null);
+    avisar("Movimiento actualizado ✓");
+  };
 
   const borrar = (id) => {
     const nuevosPagosFijos = {};
@@ -1305,8 +1312,9 @@ function Historial({ data, guardar, avisar }) {
           <div style={S.fechaHeader}>{fmtFecha(f)}</div>
           {porFecha[f].map((m) => {
             const ctaMov = data.cuentas.find((c) => c.id === m.cuentaId);
+            const enEdicion = editando === m.id;
             return (
-              <div key={m.id} style={S.movFila}>
+              <div key={m.id} style={{ ...S.movFila, flexWrap: "wrap" }}>
                 <div style={{
                   width: 4, alignSelf: "stretch", borderRadius: 2,
                   background: ctaMov ? colorEntidad(ctaMov.entidad) : C.gris,
@@ -1334,14 +1342,133 @@ function Historial({ data, guardar, avisar }) {
                       <button style={S.btnMini} onClick={() => setConfirmar(null)}>No</button>
                     </div>
                   ) : (
-                    <button style={S.btnMini} onClick={() => setConfirmar(m.id)}>borrar</button>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button style={S.btnMini} onClick={() => setEditando(enEdicion ? null : m.id)}>editar</button>
+                      <button style={S.btnMini} onClick={() => setConfirmar(m.id)}>borrar</button>
+                    </div>
                   )}
                 </div>
+                {enEdicion && (
+                  <EditarMovimiento
+                    mov={m}
+                    data={data}
+                    onGuardar={(cambios) => guardarEdicion(m.id, cambios)}
+                    onCancelar={() => setEditando(null)}
+                  />
+                )}
               </div>
             );
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ————— Editar un movimiento ya cargado —————
+function EditarMovimiento({ mov, data, onGuardar, onCancelar }) {
+  const [monto, setMonto] = useState(String(mov.monto));
+  const [fecha, setFecha] = useState(mov.fecha);
+  const [nota, setNota] = useState(mov.nota || "");
+  const [cuentaId, setCuentaId] = useState(mov.cuentaId);
+  const [grupo, setGrupo] = useState(mov.grupo || "Diarios");
+  const [categoria, setCategoria] = useState(mov.categoria || "");
+  const [monedaMov, setMonedaMov] = useState(mov.monedaMov || "");
+
+  const esGasto = mov.tipo === "gasto";
+  const esIngreso = mov.tipo === "ingreso";
+  const cta = data.cuentas.find((c) => c.id === cuentaId);
+  const esTarjeta = cta && cta.clase === "credito";
+  const catsDelGrupo = (data.grupos.find((g) => g.nombre === grupo) || { categorias: [] }).categorias;
+  const catsIngreso = (data.grupos.find((g) => g.nombre === "Ingresos") || { categorias: [] }).categorias;
+  const gruposGasto = data.grupos.filter((g) => g.nombre !== "Ingresos");
+
+  const listo = () => {
+    const m = parseMonto(monto);
+    if (isNaN(m) || m <= 0 || !cuentaId || !fecha) return false;
+    if (esGasto && !categoria) return false;
+    return true;
+  };
+
+  return (
+    <div style={{ width: "100%", marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.linea}` }}>
+      <label style={{ ...S.label, marginTop: 0 }}>Monto</label>
+      <input style={S.input} inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} autoFocus />
+
+      <label style={{ ...S.label, marginTop: 0 }}>Fecha</label>
+      <input style={S.input} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+
+      <label style={{ ...S.label, marginTop: 0 }}>{mov.tipo === "transfer" ? "Desde" : esIngreso ? "Entra a" : "Sale de"}</label>
+      <div style={S.chips}>
+        {data.cuentas.map((c) => (
+          <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaId(c.id)}>
+            {etiquetaCuenta(c)}
+          </Chip>
+        ))}
+      </div>
+
+      {esGasto && esTarjeta && (
+        <React.Fragment>
+          <label style={S.label}>Moneda del consumo</label>
+          <div style={S.chips}>
+            <Chip activo={(monedaMov || cta.moneda) === "ARS"} onClick={() => setMonedaMov("ARS")}>Pesos</Chip>
+            <Chip activo={(monedaMov || cta.moneda) === "USD"} onClick={() => setMonedaMov("USD")}>Dólares</Chip>
+          </div>
+        </React.Fragment>
+      )}
+
+      {esGasto && (
+        <React.Fragment>
+          <label style={S.label}>Grupo</label>
+          <div style={S.chips}>
+            {gruposGasto.map((g) => (
+              <Chip key={g.nombre} activo={grupo === g.nombre} onClick={() => { setGrupo(g.nombre); setCategoria(""); }}>{g.nombre}</Chip>
+            ))}
+          </div>
+          <label style={S.label}>Categoría</label>
+          <div style={S.chips}>
+            {catsDelGrupo.map((cat) => (
+              <Chip key={cat} activo={categoria === cat} onClick={() => setCategoria(cat)}>{cat}</Chip>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      {esIngreso && (
+        <React.Fragment>
+          <label style={S.label}>Categoría</label>
+          <div style={S.chips}>
+            {catsIngreso.map((cat) => (
+              <Chip key={cat} activo={categoria === cat} onClick={() => setCategoria(cat)}>{cat}</Chip>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      <label style={{ ...S.label }}>Nota</label>
+      <input style={S.input} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional" />
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          style={{ ...S.btnPrimario, flex: 1, marginTop: 0, background: listo() ? C.lav : C.linea }}
+          disabled={!listo()}
+          onClick={() => {
+            const cambios = {
+              monto: parseMonto(monto),
+              fecha,
+              nota: nota.trim(),
+              cuentaId,
+            };
+            if (esGasto) { cambios.grupo = grupo; cambios.categoria = categoria; }
+            if (esIngreso) cambios.categoria = categoria || "Otros ingresos";
+            if (esGasto && esTarjeta) cambios.monedaMov = monedaMov || cta.moneda;
+            onGuardar(cambios);
+          }}
+        >
+          Guardar cambios
+        </button>
+        <button style={S.btnSecundario} onClick={onCancelar}>Cancelar</button>
+      </div>
     </div>
   );
 }
@@ -1480,6 +1607,7 @@ function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
       <GruposYCategorias data={data} guardar={guardar} avisar={avisar} />
       <SeccionDeudas data={data} guardar={guardar} avisar={avisar} />
       <Respaldo data={data} guardar={guardar} avisar={avisar} />
+      <EmpezarDeNuevo data={data} guardar={guardar} avisar={avisar} />
     </div>
   );
 }
@@ -1948,6 +2076,110 @@ function SeccionDeudas({ data, guardar, avisar }) {
         </div>
       ) : (
         <button style={{ ...S.btnSecundario, width: "100%" }} onClick={() => setMostrarForm(true)}>+ Anotar deuda</button>
+      )}
+    </div>
+  );
+}
+
+// ————— Poner en cero / borrar —————
+function EmpezarDeNuevo({ data, guardar, avisar }) {
+  const [abierto, setAbierto] = useState(false);
+  const [confirmando, setConfirmando] = useState(null); // "movs" | "saldos" | "todo"
+  const [palabra, setPalabra] = useState("");
+
+  const cantidadMovs = data.movs.length;
+
+  const borrarMovimientos = () => {
+    guardar({ ...data, movs: [], pagosFijos: {}, deudas: [] });
+    setConfirmando(null); setPalabra("");
+    avisar("Movimientos borrados — tu estructura quedó intacta ✓");
+  };
+
+  const ponerSaldosEnCero = () => {
+    guardar({ ...data, cuentas: data.cuentas.map((c) => ({ ...c, inicial: 0 })) });
+    setConfirmando(null); setPalabra("");
+    avisar("Todos los saldos quedaron en cero ✓");
+  };
+
+  const borrarTodo = () => {
+    guardar(datosIniciales());
+    setConfirmando(null); setPalabra("");
+    avisar("Todo reiniciado — arrancás de cero ✓");
+  };
+
+  const acciones = {
+    movs: {
+      titulo: "Borrar todos los movimientos",
+      detalle: `Se borran los ${cantidadMovs} movimientos cargados (gastos, ingresos, transferencias), los pagos de fijos marcados y las deudas con personas. SE CONSERVAN tus cuentas, tarjetas, fijos, categorías, vencimientos y datos de servicios.`,
+      ejecutar: borrarMovimientos,
+    },
+    saldos: {
+      titulo: "Poner todos los saldos en cero",
+      detalle: "El saldo inicial de todas tus cuentas pasa a cero. No se borra ningún movimiento — solo se reinicia el punto de partida de cada cuenta.",
+      ejecutar: ponerSaldosEnCero,
+    },
+    todo: {
+      titulo: "Reiniciar todo",
+      detalle: "Se borra ABSOLUTAMENTE TODO y la app vuelve a como estaba el primer día: cuentas y fijos originales, sin movimientos, sin tus ediciones. No se puede deshacer.",
+      ejecutar: borrarTodo,
+    },
+  };
+
+  const act = confirmando && acciones[confirmando];
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <button style={{ ...S.acordeonHeader, background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 12 }} onClick={() => { setAbierto(!abierto); setConfirmando(null); }}>
+        <span style={{ fontSize: 14.5, fontWeight: 700, color: C.tinta }}>
+          <span style={{ color: C.lav, marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
+          Empezar de nuevo
+        </span>
+        <span style={{ fontSize: 12.5, color: C.gris }}>poner en cero</span>
+      </button>
+
+      {abierto && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12.5, color: C.gris, marginBottom: 10, lineHeight: 1.5 }}>
+            Antes de borrar, descargá una copia de respaldo acá abajo. Con esa copia podés volver atrás si te arrepentís.
+          </div>
+
+          {!confirmando ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button style={{ ...S.btnSecundario, width: "100%", textAlign: "left" }} onClick={() => setConfirmando("movs")}>
+                Borrar todos los movimientos <span style={{ color: C.gris, fontWeight: 500 }}>({cantidadMovs})</span>
+              </button>
+              <button style={{ ...S.btnSecundario, width: "100%", textAlign: "left" }} onClick={() => setConfirmando("saldos")}>
+                Poner todos los saldos en cero
+              </button>
+              <button style={{ ...S.btnSecundario, width: "100%", textAlign: "left", color: C.gasto }} onClick={() => setConfirmando("todo")}>
+                Reiniciar todo desde cero
+              </button>
+            </div>
+          ) : (
+            <div style={{ ...S.card, borderLeft: `4px solid ${C.gasto}` }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.tinta, marginBottom: 6 }}>{act.titulo}</div>
+              <div style={{ fontSize: 13, color: C.tintaSuave, lineHeight: 1.55, marginBottom: 12 }}>{act.detalle}</div>
+              <label style={{ ...S.label, marginTop: 0 }}>Para confirmar, escribí BORRAR</label>
+              <input
+                style={S.input}
+                value={palabra}
+                onChange={(e) => setPalabra(e.target.value)}
+                placeholder="BORRAR"
+                autoFocus
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  style={{ ...S.btnPrimario, flex: 1, marginTop: 0, background: palabra.trim().toUpperCase() === "BORRAR" ? C.gasto : C.linea }}
+                  disabled={palabra.trim().toUpperCase() !== "BORRAR"}
+                  onClick={act.ejecutar}
+                >
+                  Sí, borrar
+                </button>
+                <button style={S.btnSecundario} onClick={() => { setConfirmando(null); setPalabra(""); }}>Cancelar</button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
