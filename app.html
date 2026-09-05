@@ -1,0 +1,2556 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Cuaderno de finanzas</title>
+<meta name="theme-color" content="#7C6BA8" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💜</text></svg>" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #F4F2F8; }
+  * { -webkit-tap-highlight-color: transparent; }
+  input, button { touch-action: manipulation; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  Configuración de Supabase (ya cargada)                      ║
+// ╚══════════════════════════════════════════════════════════════╝
+const SUPABASE_URL = "https://sxejkjtgzdmfglqcvdmq.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_7ZirjZx2EecSKtcg5lDirg_Ef4Finpj";
+
+const configLista = SUPABASE_URL.startsWith("https://") && SUPABASE_ANON_KEY.length > 40;
+const sb = configLista ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ————— Paleta lavanda con grises —————
+const C = {
+  fondo: "#F4F2F8", carta: "#FFFFFF", tinta: "#2E2A3B", tintaSuave: "#716C80",
+  gris: "#8A8694", linea: "#E4E0EE", lav: "#7C6BA8", lavOscuro: "#5D4E85",
+  lavSuave: "#EDE9F6", ingreso: "#5E8C74", ingresoSuave: "#E7F0EA",
+  gasto: "#A85C74", gastoSuave: "#F5E8EC", transfer: "#6B7FA8",
+  transferSuave: "#E9EDF5", ambar: "#B08A3E",
+};
+
+// ————— Colores por entidad —————
+const PALETA_ENTIDADES = ["#7C6BA8", "#4A8FA8", "#5E8C74", "#B08A3E", "#A85C74", "#6B7FA8", "#9A5FA0", "#3E9E8E", "#B0703E", "#8A9A3E", "#C25E8A", "#5E6FB8"];
+const colorEntidad = (nombre) => {
+  let h = 0;
+  const s = String(nombre || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PALETA_ENTIDADES[h % PALETA_ENTIDADES.length];
+};
+
+// ————— Datos precargados (solo se usan la primera vez, si no hay datos guardados) —————
+const CUENTAS_PRECARGADAS = [
+  { nombre: "Caja de ahorro USD", entidad: "Banco Francés", clase: "ahorro", moneda: "USD" },
+  { nombre: "Tarjeta de crédito", entidad: "Banco Francés", clase: "credito", moneda: "ARS" },
+  { nombre: "Caja de ahorro USD", entidad: "Banco Santander", clase: "ahorro", moneda: "USD" },
+  { nombre: "Caja de ahorro $", entidad: "Banco Santander", clase: "ahorro", moneda: "ARS" },
+  { nombre: "Tarjeta de crédito", entidad: "Banco Santander", clase: "credito", moneda: "ARS" },
+  { nombre: "Caja de ahorro", entidad: "Banco Galicia", clase: "ahorro", moneda: "ARS" },
+  { nombre: "Tarjeta de crédito", entidad: "Mercado Libre", clase: "credito", moneda: "ARS" },
+  { nombre: "USD invertidos", entidad: "Balanz", clase: "inversion", moneda: "USD" },
+  { nombre: "USD en XRP", entidad: "Cripto", clase: "inversion", moneda: "USD" },
+  { nombre: "USD", entidad: "Payoneer", clase: "billetera", moneda: "USD" },
+  { nombre: "Efectivo $", entidad: "Efectivo", clase: "efectivo", moneda: "ARS" },
+  { nombre: "Dólares físicos", entidad: "Efectivo", clase: "efectivo", moneda: "USD" },
+  { nombre: "Mercado Pago", entidad: "Mercado Pago", clase: "billetera", moneda: "ARS" },
+];
+
+const GRUPOS_PRECARGADOS = [
+  { nombre: "Diarios", categorias: ["Comida", "Limpieza", "Farmacia / Perfumería", "Salidas / Café", "Transporte", "Otros"] },
+  { nombre: "Casa", categorias: ["Edesur", "Metrogas", "Gastos compartidos (Aysa y Edesur)", "Internet Movistar", "Teléfono personal", "ABL"] },
+  { nombre: "PH", categorias: ["Edenor PH", "Aysa PH", "Metrogas PH", "ABL PH"] },
+  { nombre: "Personales", categorias: ["Obra social", "Otros personales"] },
+  { nombre: "Herramientas de trabajo", categorias: ["Canva", "CapCut", "Claude", "Google One", "YouTube", "Spotify", "Disney+", "Microsoft 365"] },
+  { nombre: "Tarjetas", categorias: ["Pago de tarjeta"] },
+  { nombre: "Ingresos", categorias: ["Marítima", "Blu", "Clases", "Otros ingresos"] },
+];
+
+const FIJOS_PRECARGADOS = [
+  { grupo: "Casa", categoria: "Edesur" },
+  { grupo: "Casa", categoria: "Metrogas" },
+  { grupo: "Casa", categoria: "Gastos compartidos (Aysa y Edesur)" },
+  { grupo: "Casa", categoria: "Internet Movistar" },
+  { grupo: "Casa", categoria: "Teléfono personal" },
+  { grupo: "Casa", categoria: "ABL" },
+  { grupo: "PH", categoria: "Edenor PH" },
+  { grupo: "PH", categoria: "Aysa PH" },
+  { grupo: "PH", categoria: "Metrogas PH" },
+  { grupo: "PH", categoria: "ABL PH" },
+  { grupo: "Personales", categoria: "Obra social" },
+  { grupo: "Herramientas de trabajo", categoria: "Canva" },
+  { grupo: "Herramientas de trabajo", categoria: "CapCut" },
+  { grupo: "Herramientas de trabajo", categoria: "Claude" },
+  { grupo: "Herramientas de trabajo", categoria: "Google One" },
+  { grupo: "Herramientas de trabajo", categoria: "YouTube" },
+  { grupo: "Herramientas de trabajo", categoria: "Spotify" },
+  { grupo: "Herramientas de trabajo", categoria: "Disney+" },
+  { grupo: "Herramientas de trabajo", categoria: "Microsoft 365" },
+];
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+const datosIniciales = () => ({
+  cuentas: CUENTAS_PRECARGADAS.map((c) => ({ ...c, id: uid() + Math.random().toString(36).slice(2, 5), inicial: 0 })),
+  grupos: GRUPOS_PRECARGADOS,
+  fijos: FIJOS_PRECARGADOS.map((f) => ({ ...f, id: uid() + Math.random().toString(36).slice(2, 5) })),
+  pagosFijos: {},
+  movs: [],
+  deudas: [],
+});
+
+// ————— Utilidades —————
+const fmt = (n, moneda) => {
+  const v = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n);
+  return moneda === "USD" ? `US$ ${v}` : `$ ${v}`;
+};
+// Fecha LOCAL (no UTC) — importante para que los movimientos de la noche queden en el día correcto
+const hoy = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const mesActual = () => hoy().slice(0, 7);
+const diaHoy = () => new Date().getDate();
+const fmtFecha = (iso) => { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y.slice(2)}`; };
+const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const nombreMes = (ym) => { const [y, m] = ym.split("-"); return `${MESES[parseInt(m, 10) - 1]} ${y}`; };
+const mesAnterior = (ym) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const mesSiguiente = (ym) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+// Sumar meses a una fecha ISO, ajustando el día si el mes destino es más corto
+const sumarMeses = (iso, n) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const base = new Date(y, m - 1 + n, 1);
+  const ultimoDia = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+  const dia = Math.min(d, ultimoDia);
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+};
+const diasHastaDia = (dia) => {
+  const hoyD = diaHoy();
+  if (dia >= hoyD) return dia - hoyD;
+  const ahora = new Date();
+  const diasDelMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate();
+  return diasDelMes - hoyD + dia;
+};
+const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const fechaLarga = () => {
+  const d = new Date();
+  return `${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()}`;
+};
+// Fecha concreta de este mes (o del que viene si ya pasó), ej: "22 de septiembre"
+const fechaDelDia = (dia) => {
+  const ahora = new Date();
+  const pasó = dia < diaHoy();
+  const base = new Date(ahora.getFullYear(), ahora.getMonth() + (pasó ? 1 : 0), 1);
+  const ultimo = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+  return `${Math.min(dia, ultimo)} de ${MESES[base.getMonth()].toLowerCase()}`;
+};
+const parseMonto = (s) => {
+  if (!s) return NaN;
+  let t = String(s).trim().replace(/\s/g, "");
+  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+  return parseFloat(t);
+};
+const CLASES = { ahorro: "Caja de ahorro", credito: "Tarjeta de crédito", inversion: "Inversión", billetera: "Billetera", efectivo: "Efectivo" };
+const etiquetaCuenta = (c) => (!c ? "—" : c.entidad === "Efectivo" || c.entidad === "Mercado Pago" ? c.nombre : `${c.entidad} · ${c.nombre}`);
+
+// Moneda real de un movimiento: la elegida en el consumo (tarjetas) o la de la cuenta
+const monedaDelMov = (m, cuentas) => m.monedaMov || ((cuentas.find((c) => c.id === m.cuentaId) || {}).moneda || "ARS");
+
+// Movimiento que paga un fijo en un mes dado: el vinculado con el botón Pagar,
+// o cualquier gasto de ese mes con el mismo grupo y categoría (cargado desde Inicio).
+const movQuePagaFijo = (data, fijo, mes) => {
+  const link = (data.pagosFijos[mes] || {})[fijo.id];
+  if (link) {
+    const lm = data.movs.find((m) => m.id === link);
+    if (lm) return lm;
+  }
+  return data.movs.find((m) => m.tipo === "gasto" && m.grupo === fijo.grupo && m.categoria === fijo.categoria && m.fecha.slice(0, 7) === mes) || null;
+};
+
+// Deudas de tarjetas por moneda (solo consumos hasta hoy; las cuotas futuras suman en su mes)
+const calcularDeudasTarjetas = (data) => {
+  const t = {};
+  const corte = hoy();
+  data.cuentas.filter((c) => c.clase === "credito").forEach((c) => {
+    t[c.id] = { ARS: 0, USD: 0 };
+    const ini = c.inicial || 0;
+    if (ini < 0) t[c.id][c.moneda] += -ini;
+    else t[c.id][c.moneda] -= ini;
+  });
+  data.movs.forEach((m) => {
+    if (m.fecha > corte) return;
+    const cta = data.cuentas.find((c) => c.id === m.cuentaId);
+    const dest = m.cuentaDestinoId && data.cuentas.find((c) => c.id === m.cuentaDestinoId);
+    if (m.tipo === "gasto" && cta && cta.clase === "credito") {
+      const mon = m.monedaMov || cta.moneda;
+      t[cta.id][mon] += m.monto;
+    }
+    if (m.tipo === "transfer" && dest && dest.clase === "credito") {
+      const mon = m.monedaPagoTarjeta || dest.moneda;
+      t[dest.id][mon] -= m.montoDestino != null ? m.montoDestino : m.monto;
+    }
+    if (m.tipo === "transfer" && cta && cta.clase === "credito") {
+      t[cta.id][cta.moneda] += m.monto;
+    }
+  });
+  return t;
+};
+
+// ————— Interpretar frases dictadas por voz —————
+const NUM_PALABRAS = {
+  cero: 0, un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+  diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17,
+  dieciocho: 18, diecinueve: 19, veinte: 20, veintiuno: 21, veinticinco: 25, treinta: 30, cuarenta: 40,
+  cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100,
+  doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600,
+  setecientos: 700, ochocientos: 800, novecientos: 900,
+};
+
+const sinAcentos = (s) =>
+  String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+// Saca el monto de la frase: acepta "4000", "4.000", "4 mil", "cuatro mil", "cuatro mil quinientos"
+const extraerMonto = (texto) => {
+  const t = sinAcentos(texto);
+
+  // 1) Número escrito con dígitos, con o sin "mil" detrás
+  const conDigitos = t.match(/(\d+(?:[.,]\d+)?)\s*(mil|lucas|palos)?/);
+  if (conDigitos) {
+    let n = parseFloat(conDigitos[1].replace(/\./g, "").replace(",", "."));
+    if (conDigitos[2] === "mil" || conDigitos[2] === "lucas") n *= 1000;
+    if (conDigitos[2] === "palos") n *= 1000000;
+    if (!isNaN(n) && n > 0) return n;
+  }
+
+  // 2) Número en palabras
+  const palabras = t.split(/\s+/);
+  let total = 0, actual = 0, encontro = false;
+  for (const p of palabras) {
+    if (p in NUM_PALABRAS) { actual += NUM_PALABRAS[p]; encontro = true; }
+    else if (p === "mil") { actual = (actual || 1) * 1000; total += actual; actual = 0; encontro = true; }
+    else if (p === "millon" || p === "millones") { actual = (actual || 1) * 1000000; total += actual; actual = 0; encontro = true; }
+    else if (p === "y") { /* seguir acumulando: "cuarenta y cinco" */ }
+    else if (encontro && actual + total > 0) break;
+  }
+  const n = total + actual;
+  return encontro && n > 0 ? n : NaN;
+};
+
+// Busca a qué cuenta se refiere la frase
+const detectarCuenta = (texto, cuentas) => {
+  const t = sinAcentos(texto);
+  let mejor = null, mejorPuntaje = 0;
+  cuentas.forEach((c) => {
+    const candidatos = [c.entidad, c.nombre, `${c.entidad} ${c.nombre}`];
+    candidatos.forEach((cand) => {
+      const palabras = sinAcentos(cand).split(/\s+/).filter((w) => w.length > 3);
+      const aciertos = palabras.filter((w) => t.includes(w)).length;
+      if (aciertos > mejorPuntaje) { mejorPuntaje = aciertos; mejor = c; }
+    });
+  });
+  return mejor;
+};
+
+// Busca grupo + categoría mencionados
+const detectarCategoria = (texto, grupos) => {
+  const t = sinAcentos(texto);
+  let mejor = null, mejorLargo = 0;
+  grupos.forEach((g) => {
+    g.categorias.forEach((cat) => {
+      const limpia = sinAcentos(cat).replace(/[^a-z0-9\s]/g, " ");
+      limpia.split(/\s+/).filter((w) => w.length > 3).forEach((w) => {
+        if (t.includes(w) && w.length > mejorLargo) { mejorLargo = w.length; mejor = { grupo: g.nombre, categoria: cat }; }
+      });
+    });
+  });
+  return mejor;
+};
+
+const detectarTipo = (texto) => {
+  const t = sinAcentos(texto);
+  if (/\b(cobre|cobra|ingreso|ingrese|entro|entraron|me pagaron|vendi|recibi|gane)\b/.test(t)) return "ingreso";
+  if (/\b(transferi|pase|cambie|moví|movi)\b/.test(t)) return "transfer";
+  return "gasto";
+};
+
+// ————— Raíz: config → sesión → app —————
+function Root() {
+  const [session, setSession] = useState(null);
+  const [listo, setListo] = useState(false);
+
+  useEffect(() => {
+    if (!sb) { setListo(true); return; }
+    sb.auth.getSession().then(({ data }) => { setSession(data.session); setListo(true); });
+    const { data: sub } = sb.auth.onAuthStateChange((_ev, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  if (!configLista) return <PantallaConfig />;
+  if (!listo) return <PantallaCentrada texto="Abriendo tu cuaderno…" />;
+  if (!session) return <Login />;
+  return <MisFinanzas session={session} />;
+}
+
+function PantallaCentrada({ texto }) {
+  return (
+    <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div style={{ color: C.tintaSuave, fontSize: 15 }}>{texto}</div>
+    </div>
+  );
+}
+
+function PantallaConfig() {
+  return (
+    <div style={{ ...S.app, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ ...S.card, maxWidth: 420 }}>
+        <div style={S.eyebrow}>Falta un paso</div>
+        <h2 style={{ margin: "6px 0 10px", color: C.tinta }}>Conectar con Supabase</h2>
+        <p style={{ fontSize: 14, color: C.tintaSuave, lineHeight: 1.6 }}>
+          Abrí el archivo <b>index.html</b> y pegá tu <b>Project URL</b> y tu <b>Publishable key</b> al principio del código.
+          Guardá el archivo, volvé a subirlo y recargá esta página.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ————— Login —————
+function Login() {
+  const [modo, setModo] = useState("ingresar");
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [error, setError] = useState("");
+  const [mensaje, setMensaje] = useState("");
+  const [cargando, setCargando] = useState(false);
+
+  const enviar = async () => {
+    setError(""); setMensaje("");
+    if (!email.trim() || pass.length < 6) {
+      setError("Poné tu email y una contraseña de al menos 6 caracteres.");
+      return;
+    }
+    setCargando(true);
+    try {
+      if (modo === "crear") {
+        const { data, error: e } = await sb.auth.signUp({ email: email.trim(), password: pass });
+        if (e) throw e;
+        if (!data.session) {
+          setMensaje("¡Cuenta creada! Revisá tu email para confirmarla y después ingresá.");
+        }
+      } else {
+        const { error: e } = await sb.auth.signInWithPassword({ email: email.trim(), password: pass });
+        if (e) throw e;
+      }
+    } catch (e) {
+      const msg = String(e.message || e);
+      setError(
+        msg.includes("Invalid login") ? "Email o contraseña incorrectos." :
+        msg.includes("already registered") ? "Ese email ya tiene cuenta — probá ingresar." :
+        msg.includes("Email not confirmed") ? "Tu email todavía no está confirmado — revisá tu casilla." :
+        "No se pudo completar: " + msg
+      );
+    }
+    setCargando(false);
+  };
+
+  return (
+    <div style={{ ...S.app, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ ...S.card, width: "100%", maxWidth: 380 }}>
+        <div style={S.eyebrow}>Cuaderno de finanzas</div>
+        <h2 style={{ margin: "6px 0 16px", color: C.tinta, fontSize: 24 }}>
+          {modo === "ingresar" ? "Hola de nuevo 💜" : "Crear tu cuenta"}
+        </h2>
+
+        <label style={{ ...S.label, marginTop: 0 }}>Email</label>
+        <input style={S.input} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com" />
+
+        <label style={{ ...S.label, marginTop: 0 }}>Contraseña</label>
+        <input
+          style={S.input}
+          type="password"
+          autoComplete={modo === "crear" ? "new-password" : "current-password"}
+          value={pass}
+          onChange={(e) => setPass(e.target.value)}
+          placeholder="Mínimo 6 caracteres"
+          onKeyDown={(e) => e.key === "Enter" && enviar()}
+        />
+
+        {error && <div style={{ fontSize: 13, color: C.gasto, marginBottom: 10 }}>{error}</div>}
+        {mensaje && <div style={{ fontSize: 13, color: C.ingreso, marginBottom: 10 }}>{mensaje}</div>}
+
+        <button style={{ ...S.btnPrimario, marginTop: 4, opacity: cargando ? 0.6 : 1 }} onClick={enviar} disabled={cargando}>
+          {cargando ? "Un momento…" : modo === "ingresar" ? "Ingresar" : "Crear cuenta"}
+        </button>
+
+        <button
+          style={{ ...S.btnFantasma, width: "100%", textAlign: "center", marginTop: 8 }}
+          onClick={() => { setModo(modo === "ingresar" ? "crear" : "ingresar"); setError(""); setMensaje(""); }}
+        >
+          {modo === "ingresar" ? "¿Primera vez? Crear cuenta" : "Ya tengo cuenta — ingresar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ————— App principal —————
+function MisFinanzas({ session }) {
+  const [data, setData] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState(false);
+  const [errorStorage, setErrorStorage] = useState(false);
+  const [tab, setTab] = useState("inicio");
+  const [aviso, setAviso] = useState("");
+
+  const cargarDatos = async () => {
+    setCargando(true);
+    setErrorCarga(false);
+    try {
+      const { data: fila, error } = await sb
+        .from("finanzas")
+        .select("data")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (error) throw error;
+      // Solo usamos datos iniciales si la consulta FUNCIONÓ y confirmó que no hay nada guardado.
+      // Si la consulta falla, NUNCA pisamos tus datos: mostramos error y reintentás.
+      setData(fila && fila.data ? fila.data : datosIniciales());
+    } catch (e) {
+      setErrorCarga(true);
+    }
+    setCargando(false);
+  };
+
+  useEffect(() => { cargarDatos(); }, [session.user.id]);
+
+  const guardar = async (nuevo) => {
+    setData(nuevo);
+    try {
+      const { error } = await sb.from("finanzas").upsert({
+        user_id: session.user.id,
+        data: nuevo,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+      setErrorStorage(false);
+    } catch (e) {
+      setErrorStorage(true);
+    }
+  };
+
+  const salir = () => sb.auth.signOut();
+
+  const avisar = (msg) => {
+    setAviso(msg);
+    setTimeout(() => setAviso(""), 2400);
+  };
+
+  const balances = useMemo(() => {
+    if (!data) return {};
+    const b = {};
+    data.cuentas.forEach((c) => { if (c.clase !== "credito") b[c.id] = c.inicial || 0; });
+    data.movs.forEach((m) => {
+      const esNoCredito = (id) => id in b;
+      if (m.tipo === "ingreso" && esNoCredito(m.cuentaId)) b[m.cuentaId] += m.monto;
+      if (m.tipo === "gasto" && esNoCredito(m.cuentaId)) b[m.cuentaId] -= m.monto;
+      if (m.tipo === "transfer") {
+        if (esNoCredito(m.cuentaId)) b[m.cuentaId] -= m.monto;
+        if (esNoCredito(m.cuentaDestinoId)) b[m.cuentaDestinoId] += (m.montoDestino != null ? m.montoDestino : m.monto);
+      }
+    });
+    return b;
+  }, [data]);
+
+  const deudasTarjetas = useMemo(() => (data ? calcularDeudasTarjetas(data) : {}), [data]);
+
+  if (cargando) return <PantallaCentrada texto="Abriendo tu cuaderno…" />;
+
+  if (errorCarga) {
+    return (
+      <div style={{ ...S.app, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ ...S.card, maxWidth: 380, textAlign: "center" }}>
+          <div style={{ fontSize: 15, color: C.tinta, fontWeight: 600, marginBottom: 6 }}>No pudimos traer tus datos</div>
+          <div style={{ fontSize: 13.5, color: C.tintaSuave, marginBottom: 14, lineHeight: 1.5 }}>
+            Tranquila: tus datos están a salvo en la nube. Suele ser un tema de conexión.
+          </div>
+          <button style={S.btnPrimario} onClick={cargarDatos}>Reintentar</button>
+        </div>
+      </div>
+    );
+  }
+
+  const titulos = { inicio: "Hoy", fijos: "Fijos del mes", resumen: "Resumen", historial: "Historial", cuentas: "Tus cuentas" };
+
+  return (
+    <div style={S.app}>
+      <div style={S.marco}>
+        <header style={S.header}>
+          <div>
+            <div style={S.eyebrow}>{fechaLarga()}</div>
+            <h1 style={S.titulo}>{titulos[tab]}</h1>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            {errorStorage && <div style={S.badgeError}>Sin guardar — revisá conexión</div>}
+            <button style={S.btnMini} onClick={salir}>cerrar sesión</button>
+          </div>
+        </header>
+
+        {tab === "inicio" && <Inicio data={data} balances={balances} deudasTarjetas={deudasTarjetas} guardar={guardar} avisar={avisar} />}
+        {tab === "fijos" && <Fijos data={data} guardar={guardar} avisar={avisar} />}
+        {tab === "resumen" && <Resumen data={data} />}
+        {tab === "historial" && <Historial data={data} guardar={guardar} avisar={avisar} />}
+        {tab === "cuentas" && <Cuentas data={data} balances={balances} deudasTarjetas={deudasTarjetas} guardar={guardar} avisar={avisar} />}
+
+        <nav style={S.nav}>
+          {[["inicio", "Inicio"], ["fijos", "Fijos"], ["resumen", "Resumen"], ["historial", "Historial"], ["cuentas", "Cuentas"]].map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              style={{
+                ...S.navBtn,
+                color: tab === k ? C.lavOscuro : C.gris,
+                borderTop: tab === k ? `2px solid ${C.lav}` : "2px solid transparent",
+                fontWeight: tab === k ? 700 : 500,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {aviso && <div style={S.toast}>{aviso}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ————— Inicio —————
+function Inicio({ data, balances, deudasTarjetas, guardar, avisar }) {
+  const totales = useMemo(() => {
+    const t = { disponible: { ARS: 0, USD: 0 }, tarjetas: { ARS: 0, USD: 0 } };
+    data.cuentas.forEach((c) => {
+      if (c.clase === "credito") {
+        const d = deudasTarjetas[c.id] || { ARS: 0, USD: 0 };
+        if (d.ARS > 0) t.tarjetas.ARS += d.ARS;
+        if (d.USD > 0) t.tarjetas.USD += d.USD;
+      } else {
+        t.disponible[c.moneda] += balances[c.id] || 0;
+      }
+    });
+    return t;
+  }, [data, balances, deudasTarjetas]);
+
+  const mes = mesActual();
+  const fijosPagados = data.fijos.filter((f) => movQuePagaFijo(data, f, mes)).length;
+  const fijosTotal = data.fijos.length;
+
+  return (
+    <div style={{ paddingBottom: 90 }}>
+      <div style={{ ...S.card, background: `linear-gradient(135deg, ${C.lavOscuro}, ${C.lav})`, border: "none" }}>
+        <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+          {["ARS", "USD"].map((mon) => (
+            <div key={mon}>
+              <div style={{ fontSize: 12, color: "#CFC7E4", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                {mon === "ARS" ? "Pesos" : "Dólares"}
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: "#fff", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                {fmt(totales.disponible[mon], mon)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 20, marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.18)", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#CFC7E4" }}>Deuda de tarjetas</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#F3D3DD", fontVariantNumeric: "tabular-nums" }}>
+              {totales.tarjetas.ARS <= 0 && totales.tarjetas.USD <= 0
+                ? "Al día ✓"
+                : [totales.tarjetas.ARS > 0 && fmt(totales.tarjetas.ARS, "ARS"), totales.tarjetas.USD > 0 && fmt(totales.tarjetas.USD, "USD")].filter(Boolean).join(" · ")}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#CFC7E4" }}>Fijos del mes</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: fijosPagados === fijosTotal ? "#C8E6D2" : "#F0E2B8" }}>
+              {fijosPagados} de {fijosTotal} pagados
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Vencidos data={data} deudasTarjetas={deudasTarjetas} />
+
+      <CargaRapida data={data} guardar={guardar} avisar={avisar} />
+    </div>
+  );
+}
+
+// ————— Cartel de vencidos —————
+function Vencidos({ data, deudasTarjetas }) {
+  const mes = mesActual();
+
+  const fijosVencidos = data.fijos.filter(
+    (f) => f.venceDia && !movQuePagaFijo(data, f, mes) && diaHoy() > f.venceDia
+  );
+
+  const tieneDeuda = (id) => {
+    const d = deudasTarjetas[id] || { ARS: 0, USD: 0 };
+    return d.ARS > 0 || d.USD > 0;
+  };
+
+  const tarjetasVencidas = data.cuentas.filter(
+    (c) =>
+      c.clase === "credito" &&
+      c.venceDia &&
+      tieneDeuda(c.id) &&
+      diaHoy() > c.venceDia &&
+      !data.movs.some((m) => m.tipo === "transfer" && m.cuentaDestinoId === c.id && m.fecha.slice(0, 7) === mes)
+  );
+
+  const proximos = data.fijos.filter(
+    (f) => f.venceDia && !movQuePagaFijo(data, f, mes) && diaHoy() <= f.venceDia && f.venceDia - diaHoy() <= 3
+  );
+
+  if (fijosVencidos.length === 0 && tarjetasVencidas.length === 0 && proximos.length === 0) return null;
+
+  const deudaTexto = (id, moneda) => {
+    const d = deudasTarjetas[id] || { ARS: 0, USD: 0 };
+    return [d.ARS > 0 && fmt(d.ARS, "ARS"), d.USD > 0 && fmt(d.USD, "USD")].filter(Boolean).join(" + ");
+  };
+
+  return (
+    <div style={{ ...S.card, borderLeft: `4px solid ${fijosVencidos.length || tarjetasVencidas.length ? C.gasto : C.ambar}` }}>
+      {(fijosVencidos.length > 0 || tarjetasVencidas.length > 0) && (
+        <div style={{ marginBottom: proximos.length ? 10 : 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.gasto, marginBottom: 6 }}>
+            ⚠ Vencidos
+          </div>
+          {fijosVencidos.map((f) => (
+            <div key={f.id} style={{ fontSize: 13.5, color: C.tinta, marginBottom: 3 }}>
+              <b>{f.categoria}</b> <span style={{ color: C.gris }}>— venció el {f.venceDia}</span>
+            </div>
+          ))}
+          {tarjetasVencidas.map((c) => (
+            <div key={c.id} style={{ fontSize: 13.5, color: C.tinta, marginBottom: 3 }}>
+              <b>{etiquetaCuenta(c)}</b> <span style={{ color: C.gris }}>— venció el {c.venceDia} · debés {deudaTexto(c.id)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {proximos.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.ambar, marginBottom: 6 }}>
+            Vencen pronto
+          </div>
+          {proximos.map((f) => (
+            <div key={f.id} style={{ fontSize: 13.5, color: C.tinta, marginBottom: 3 }}>
+              <b>{f.categoria}</b> <span style={{ color: C.gris }}>— {f.venceDia === diaHoy() ? "vence hoy" : `vence el ${f.venceDia}`}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ————— Carga rápida —————
+function CargaRapida({ data, guardar, avisar }) {
+  const [tipo, setTipo] = useState("gasto");
+  const [monto, setMonto] = useState("");
+  const [cuentaId, setCuentaId] = useState("");
+  const [cuentaDestinoId, setCuentaDestinoId] = useState("");
+  const [montoDestino, setMontoDestino] = useState("");
+  const [grupo, setGrupo] = useState("Diarios");
+  const [categoria, setCategoria] = useState("");
+  const [nota, setNota] = useState("");
+  const [fecha, setFecha] = useState(hoy());
+  const [masOpciones, setMasOpciones] = useState(false);
+  const [monedaTarjeta, setMonedaTarjeta] = useState("");
+  const [cuotas, setCuotas] = useState(1);
+  const [cuotasOtro, setCuotasOtro] = useState("");
+  const [cuotasYaPagas, setCuotasYaPagas] = useState("");
+  const [escuchando, setEscuchando] = useState(false);
+  const [dictado, setDictado] = useState("");
+  const [errorVoz, setErrorVoz] = useState("");
+  const recRef = useRef(null);
+
+  const hayVoz = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const aplicarDictado = (frase) => {
+    setDictado(frase);
+    const t = detectarTipo(frase);
+    setTipo(t);
+
+    const m = extraerMonto(frase);
+    if (!isNaN(m)) setMonto(String(m));
+
+    const c = detectarCuenta(frase, data.cuentas);
+    if (c) setCuentaId(c.id);
+
+    if (t === "gasto") {
+      const cat = detectarCategoria(frase, data.grupos.filter((g) => g.nombre !== "Ingresos"));
+      if (cat) { setGrupo(cat.grupo); setCategoria(cat.categoria); }
+    } else if (t === "ingreso") {
+      const cat = detectarCategoria(frase, data.grupos.filter((g) => g.nombre === "Ingresos"));
+      if (cat) setCategoria(cat.categoria);
+    }
+
+    setNota(frase);
+    setMasOpciones(true);
+    setFecha(hoy());
+  };
+
+  const escuchar = () => {
+    setErrorVoz("");
+    if (!hayVoz) {
+      setErrorVoz("Tu navegador no permite dictado. Probá con Chrome, o usá el micrófono del teclado escribiendo en la nota.");
+      return;
+    }
+    if (escuchando && recRef.current) { recRef.current.stop(); return; }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = "es-AR";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (ev) => {
+      const frase = ev.results[0][0].transcript;
+      aplicarDictado(frase);
+    };
+    rec.onerror = (ev) => {
+      setErrorVoz(
+        ev.error === "not-allowed" ? "Necesito permiso para usar el micrófono. Habilitalo en el candado de la barra de direcciones."
+        : ev.error === "no-speech" ? "No te escuché. Probá de nuevo."
+        : "No se pudo escuchar: " + ev.error
+      );
+      setEscuchando(false);
+    };
+    rec.onend = () => setEscuchando(false);
+    try { rec.start(); setEscuchando(true); } catch (e) { setErrorVoz("No se pudo abrir el micrófono."); }
+  };
+
+  const cta = data.cuentas.find((c) => c.id === cuentaId);
+  const ctaDestino = data.cuentas.find((c) => c.id === cuentaDestinoId);
+  const cruzaMoneda = tipo === "transfer" && cta && ctaDestino && cta.moneda !== ctaDestino.moneda;
+  const colorTipo = tipo === "gasto" ? C.gasto : tipo === "ingreso" ? C.ingreso : C.transfer;
+  const esTarjeta = cta && cta.clase === "credito";
+  const monedaGasto = esTarjeta ? (monedaTarjeta || cta.moneda) : (cta ? cta.moneda : "ARS");
+  const nCuotas = cuotas === "otro" ? parseInt(cuotasOtro, 10) || 0 : cuotas;
+
+  const gruposGasto = data.grupos.filter((g) => g.nombre !== "Ingresos" && g.nombre !== "Tarjetas");
+  const catsIngreso = (data.grupos.find((g) => g.nombre === "Ingresos") || { categorias: [] }).categorias;
+  const catsDelGrupo = (data.grupos.find((g) => g.nombre === grupo) || { categorias: [] }).categorias;
+
+  const puedeGuardar = () => {
+    const m = parseMonto(monto);
+    if (isNaN(m) || m <= 0 || !cuentaId) return false;
+    if (tipo === "gasto" && !categoria) return false;
+    if (tipo === "gasto" && esTarjeta && nCuotas < 1) return false;
+    if (tipo === "transfer") {
+      if (!cuentaDestinoId || cuentaDestinoId === cuentaId) return false;
+      if (cruzaMoneda && (isNaN(parseMonto(montoDestino)) || parseMonto(montoDestino) <= 0)) return false;
+    }
+    return true;
+  };
+
+  const guardarMov = () => {
+    if (!puedeGuardar()) return;
+    const m = parseMonto(monto);
+    const nuevosMovs = [];
+
+    if (tipo === "gasto" && esTarjeta && nCuotas > 1) {
+      // Compra en cuotas: un movimiento por mes, cada uno por monto/cuotas.
+      // Si ya pagaste algunas, la primera cuota se ubica hacia atrás para que
+      // el historial y el acumulado queden fieles a la realidad.
+      const yaPagas = Math.max(0, Math.min(parseInt(cuotasYaPagas, 10) || 0, nCuotas - 1));
+      const porCuota = Math.round((m / nCuotas) * 100) / 100;
+      let acumulado = 0;
+      for (let i = 1; i <= nCuotas; i++) {
+        const montoCuota = i === nCuotas ? Math.round((m - acumulado) * 100) / 100 : porCuota;
+        acumulado += montoCuota;
+        nuevosMovs.push({
+          id: uid() + i,
+          tipo: "gasto",
+          monto: montoCuota,
+          cuentaId,
+          fecha: sumarMeses(fecha, i - 1 - yaPagas),
+          nota: `${nota.trim() ? nota.trim() + " " : ""}(cuota ${i}/${nCuotas})`,
+          grupo,
+          categoria,
+          monedaMov: monedaGasto,
+          cuotasTotal: nCuotas,
+        });
+      }
+    } else {
+      const mov = {
+        id: uid(),
+        tipo,
+        monto: m,
+        cuentaId,
+        fecha,
+        nota: nota.trim(),
+        grupo: tipo === "gasto" ? grupo : tipo === "ingreso" ? "Ingresos" : "Transferencias",
+        categoria: tipo === "gasto" ? categoria : tipo === "ingreso" ? (categoria || "Otros ingresos") : "Transferencia",
+      };
+      if (tipo === "gasto" && esTarjeta) mov.monedaMov = monedaGasto;
+      if (tipo === "transfer") {
+        mov.cuentaDestinoId = cuentaDestinoId;
+        if (cruzaMoneda) mov.montoDestino = parseMonto(montoDestino);
+      }
+      nuevosMovs.push(mov);
+    }
+
+    guardar({ ...data, movs: [...nuevosMovs, ...data.movs] });
+    setMonto(""); setNota(""); setMontoDestino(""); setFecha(hoy()); setCuotas(1); setCuotasOtro("");
+    avisar(
+      tipo === "gasto" && esTarjeta && nCuotas > 1 ? `${fmt(m, monedaGasto)} en ${nCuotas} cuotas anotado ✓`
+      : tipo === "gasto" ? `Gasto de ${fmt(m, monedaGasto)} anotado ✓`
+      : tipo === "ingreso" ? `Ingreso de ${fmt(m, cta.moneda)} anotado ✓`
+      : "Movimiento entre cajas anotado ✓"
+    );
+  };
+
+  return (
+    <div style={{ ...S.card, borderTop: `3px solid ${colorTipo}` }}>
+      <button
+        style={{
+          ...S.btnVoz,
+          background: escuchando ? C.gasto : C.lavSuave,
+          color: escuchando ? "#fff" : C.lavOscuro,
+        }}
+        onClick={escuchar}
+      >
+        {escuchando ? "🎙 Escuchando… tocá para parar" : "🎙 Dictar el movimiento"}
+      </button>
+
+      {dictado && (
+        <div style={{ fontSize: 12.5, color: C.tintaSuave, background: C.lavSuave, padding: "8px 10px", borderRadius: 8, marginBottom: 10, lineHeight: 1.45 }}>
+          Escuché: <i>"{dictado}"</i><br />
+          <span style={{ color: C.gris }}>Revisá lo que completé abajo y tocá Anotar.</span>
+        </div>
+      )}
+      {errorVoz && <div style={{ fontSize: 12.5, color: C.gasto, marginBottom: 10, lineHeight: 1.45 }}>{errorVoz}</div>}
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {[["gasto", "Gasto"], ["ingreso", "Ingreso"], ["transfer", "Entre cajas"]].map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => { setTipo(k); setCategoria(""); }}
+            style={{
+              ...S.tipoBtn,
+              background: tipo === k ? (k === "gasto" ? C.gastoSuave : k === "ingreso" ? C.ingresoSuave : C.transferSuave) : "transparent",
+              color: tipo === k ? (k === "gasto" ? C.gasto : k === "ingreso" ? C.ingreso : C.transfer) : C.gris,
+              borderColor: tipo === k ? "transparent" : C.linea,
+              fontWeight: tipo === k ? 700 : 500,
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <input
+        style={{ ...S.inputMonto, color: colorTipo }}
+        inputMode="decimal"
+        placeholder="¿Cuánto?"
+        value={monto}
+        onChange={(e) => setMonto(e.target.value)}
+      />
+
+      <label style={S.label}>
+        {tipo === "transfer" ? "Desde" : tipo === "ingreso" ? "Entra a" : "Sale de (cuenta o tarjeta)"}
+      </label>
+      <div style={S.chips}>
+        {data.cuentas.map((c) => (
+          <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => { setCuentaId(c.id); setMonedaTarjeta(""); setCuotas(1); }}>
+            {etiquetaCuenta(c)}
+          </Chip>
+        ))}
+      </div>
+
+      {tipo === "gasto" && esTarjeta && (
+        <React.Fragment>
+          <label style={S.label}>¿En qué moneda es el consumo?</label>
+          <div style={S.chips}>
+            <Chip activo={monedaGasto === "ARS"} onClick={() => setMonedaTarjeta("ARS")}>Pesos</Chip>
+            <Chip activo={monedaGasto === "USD"} onClick={() => setMonedaTarjeta("USD")}>Dólares</Chip>
+          </div>
+          <label style={S.label}>¿En cuotas?</label>
+          <div style={S.chips}>
+            {[1, 3, 6, 12].map((n) => (
+              <Chip key={n} activo={cuotas === n} onClick={() => { setCuotas(n); setCuotasOtro(""); }}>
+                {n === 1 ? "Un pago" : `${n} cuotas`}
+              </Chip>
+            ))}
+            <Chip activo={cuotas === "otro"} onClick={() => setCuotas("otro")}>Otra cantidad</Chip>
+          </div>
+          {cuotas === "otro" && (
+            <input
+              style={{ ...S.input, marginTop: 6 }}
+              inputMode="numeric"
+              placeholder="¿Cuántas cuotas?"
+              value={cuotasOtro}
+              onChange={(e) => setCuotasOtro(e.target.value)}
+            />
+          )}
+          {nCuotas > 1 && (
+            <React.Fragment>
+              <label style={S.label}>¿Ya venís pagando cuotas de antes? (opcional)</label>
+              <input
+                style={S.input}
+                inputMode="numeric"
+                placeholder="¿Cuántas cuotas ya pagaste? Dejá vacío si arranca ahora"
+                value={cuotasYaPagas}
+                onChange={(e) => setCuotasYaPagas(e.target.value)}
+              />
+            </React.Fragment>
+          )}
+          {nCuotas > 1 && parseMonto(monto) > 0 && (
+            <div style={{ fontSize: 12.5, color: C.tintaSuave, marginTop: 2, lineHeight: 1.5 }}>
+              {(() => {
+                const ya = Math.max(0, Math.min(parseInt(cuotasYaPagas, 10) || 0, nCuotas - 1));
+                const cuota = fmt(Math.round((parseMonto(monto) / nCuotas) * 100) / 100, monedaGasto);
+                return ya > 0
+                  ? `${cuota} por mes. Registro las ${ya} cuotas ya pagadas en los meses anteriores y las ${nCuotas - ya} que faltan desde este mes.`
+                  : `El total se divide: ${cuota} por mes durante ${nCuotas} meses, empezando este mes.`;
+              })()}
+            </div>
+          )}
+        </React.Fragment>
+      )}
+
+      {tipo === "transfer" && (
+        <React.Fragment>
+          <label style={S.label}>Hacia</label>
+          <div style={S.chips}>
+            {data.cuentas.filter((c) => c.id !== cuentaId).map((c) => (
+              <Chip key={c.id} activo={cuentaDestinoId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaDestinoId(c.id)}>
+                {etiquetaCuenta(c)}
+              </Chip>
+            ))}
+          </div>
+          {cruzaMoneda && (
+            <React.Fragment>
+              <label style={S.label}>Monto que llega en {ctaDestino.moneda === "USD" ? "dólares" : "pesos"}</label>
+              <input
+                style={S.input}
+                inputMode="decimal"
+                placeholder={ctaDestino.moneda === "USD" ? "Ej: 100" : "Ej: 120000"}
+                value={montoDestino}
+                onChange={(e) => setMontoDestino(e.target.value)}
+              />
+            </React.Fragment>
+          )}
+        </React.Fragment>
+      )}
+
+      {tipo === "gasto" && (
+        <React.Fragment>
+          <label style={S.label}>Grupo</label>
+          <div style={S.chips}>
+            {gruposGasto.map((g) => (
+              <Chip key={g.nombre} activo={grupo === g.nombre} onClick={() => { setGrupo(g.nombre); setCategoria(""); }}>
+                {g.nombre}
+              </Chip>
+            ))}
+          </div>
+          <label style={S.label}>Categoría</label>
+          <div style={S.chips}>
+            {catsDelGrupo.map((cat) => (
+              <Chip key={cat} activo={categoria === cat} onClick={() => setCategoria(categoria === cat ? "" : cat)}>
+                {cat}
+              </Chip>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      {tipo === "ingreso" && (
+        <React.Fragment>
+          <label style={S.label}>Categoría (opcional)</label>
+          <div style={S.chips}>
+            {catsIngreso.map((cat) => (
+              <Chip key={cat} activo={categoria === cat} onClick={() => setCategoria(categoria === cat ? "" : cat)}>
+                {cat}
+              </Chip>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      {masOpciones ? (
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <input
+            style={{ ...S.input, flex: 2, marginBottom: 0 }}
+            placeholder="Nota — ej: feria, clase particular…"
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+          />
+          <input
+            style={{ ...S.input, flex: 1, marginBottom: 0 }}
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+          />
+        </div>
+      ) : (
+        <button style={S.btnFantasma} onClick={() => setMasOpciones(true)}>+ nota o fecha</button>
+      )}
+
+      <button
+        style={{ ...S.btnPrimario, background: puedeGuardar() ? colorTipo : C.linea, marginTop: 14 }}
+        onClick={guardarMov}
+        disabled={!puedeGuardar()}
+      >
+        Anotar
+      </button>
+
+      {esTarjeta && tipo === "gasto" && (
+        <div style={{ fontSize: 12.5, color: C.tintaSuave, marginTop: 8, lineHeight: 1.5 }}>
+          Este consumo suma a la deuda de la tarjeta en la moneda que elegiste. Cuando pagues el resumen, registralo desde Cuentas → "Pagar tarjeta".
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ————— Fijos del mes —————
+function Fijos({ data, guardar, avisar }) {
+  const [mes, setMes] = useState(mesActual());
+  const [pagando, setPagando] = useState(null);
+  const [monto, setMonto] = useState("");
+  const [cuentaId, setCuentaId] = useState("");
+  const [nuevoFijo, setNuevoFijo] = useState(false);
+  const [nfNombre, setNfNombre] = useState("");
+  const [nfGrupo, setNfGrupo] = useState("Casa");
+  const [nfVence, setNfVence] = useState("");
+  const [nfDatos, setNfDatos] = useState("");
+  const [editandoFijo, setEditandoFijo] = useState(null);
+  const [efNombre, setEfNombre] = useState("");
+  const [efGrupo, setEfGrupo] = useState("");
+  const [efVence, setEfVence] = useState("");
+  const [efDatos, setEfDatos] = useState("");
+  const [verPagados, setVerPagados] = useState(false);
+
+  const pagosMes = data.pagosFijos[mes] || {};
+  const gruposElegibles = data.grupos.filter((g) => g.nombre !== "Ingresos" && g.nombre !== "Tarjetas");
+
+  const fijosConEstado = data.fijos.map((f) => ({ fijo: f, mov: movQuePagaFijo(data, f, mes) }));
+  const pendientes = fijosConEstado.filter((x) => !x.mov);
+  const pagadosLista = fijosConEstado.filter((x) => x.mov);
+  const gruposPendientes = [...new Set(pendientes.map((x) => x.fijo.grupo))];
+
+  const pagar = (fijo) => {
+    const m = parseMonto(monto);
+    if (isNaN(m) || m <= 0 || !cuentaId) return;
+    const mov = {
+      id: uid(),
+      tipo: "gasto",
+      monto: m,
+      cuentaId,
+      fecha: mes === mesActual() ? hoy() : `${mes}-28`,
+      grupo: fijo.grupo,
+      categoria: fijo.categoria,
+      nota: "",
+      fijoId: fijo.id,
+    };
+    const cta = data.cuentas.find((c) => c.id === cuentaId);
+    if (cta && cta.clase === "credito") mov.monedaMov = cta.moneda;
+    guardar({
+      ...data,
+      movs: [mov, ...data.movs],
+      pagosFijos: { ...data.pagosFijos, [mes]: { ...pagosMes, [fijo.id]: mov.id } },
+    });
+    setPagando(null); setMonto(""); setCuentaId("");
+    avisar(`${fijo.categoria} pagado ✓`);
+  };
+
+  const deshacer = (fijo, mov) => {
+    const nuevosPagos = { ...pagosMes };
+    delete nuevosPagos[fijo.id];
+    guardar({
+      ...data,
+      movs: data.movs.filter((m) => m.id !== mov.id),
+      pagosFijos: { ...data.pagosFijos, [mes]: nuevosPagos },
+    });
+    avisar("Pago deshecho — balance actualizado");
+  };
+
+  const agregarFijo = () => {
+    const n = nfNombre.trim();
+    if (!n) return;
+    const grupoObj = data.grupos.find((g) => g.nombre === nfGrupo);
+    const nuevosGrupos = grupoObj && !grupoObj.categorias.includes(n)
+      ? data.grupos.map((g) => (g.nombre === nfGrupo ? { ...g, categorias: [...g.categorias, n] } : g))
+      : data.grupos;
+    const vd = parseInt(nfVence, 10);
+    guardar({ ...data, grupos: nuevosGrupos, fijos: [...data.fijos, { id: uid(), grupo: nfGrupo, categoria: n, venceDia: vd >= 1 && vd <= 31 ? vd : null, datos: nfDatos.trim() }] });
+    setNfNombre(""); setNfVence(""); setNfDatos(""); setNuevoFijo(false);
+    avisar(`Fijo "${n}" agregado`);
+  };
+
+  const guardarEdicionFijo = (fijo) => {
+    const nuevoNombre = efNombre.trim();
+    if (!nuevoNombre) return;
+    const viejoNombre = fijo.categoria;
+    const viejoGrupo = fijo.grupo;
+    const nuevoGrupo = efGrupo || viejoGrupo;
+
+    let grupos = data.grupos.map((g) => {
+      let cats = g.categorias;
+      if (g.nombre === viejoGrupo) cats = cats.filter((c) => c !== viejoNombre);
+      if (g.nombre === nuevoGrupo && !cats.includes(nuevoNombre)) cats = [...cats, nuevoNombre];
+      return { ...g, categorias: cats };
+    });
+
+    const movs = data.movs.map((m) =>
+      m.categoria === viejoNombre && m.grupo === viejoGrupo
+        ? { ...m, categoria: nuevoNombre, grupo: nuevoGrupo }
+        : m
+    );
+
+    const vd = parseInt(efVence, 10);
+    const fijos = data.fijos.map((f) => (f.id === fijo.id ? { ...f, categoria: nuevoNombre, grupo: nuevoGrupo, venceDia: vd >= 1 && vd <= 31 ? vd : null, datos: efDatos.trim() } : f));
+
+    guardar({ ...data, grupos, movs, fijos });
+    setEditandoFijo(null);
+    avisar("Fijo actualizado en todos lados ✓");
+  };
+
+  const quitarFijo = (fijo) => {
+    guardar({ ...data, fijos: data.fijos.filter((f) => f.id !== fijo.id) });
+    avisar(`"${fijo.categoria}" quitado de los fijos (su historial se conserva)`);
+  };
+
+  const totalPagado = pagadosLista.reduce((acc, x) => {
+    const mon = monedaDelMov(x.mov, data.cuentas);
+    acc[mon] = (acc[mon] || 0) + x.mov.monto;
+    return acc;
+  }, {});
+
+  return (
+    <div style={{ paddingBottom: 90 }}>
+      <SelectorMes mes={mes} setMes={setMes} />
+
+      <div style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 13, color: C.tintaSuave }}>Pagados este mes</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: pagadosLista.length === data.fijos.length ? C.lav : C.tinta }}>
+            {pagadosLista.length} de {data.fijos.length}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 13, color: C.tintaSuave }}>Total pagado</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.gasto, fontVariantNumeric: "tabular-nums" }}>
+            {Object.keys(totalPagado).length === 0 ? "—" : Object.entries(totalPagado).map(([m, v]) => fmt(v, m)).join(" · ")}
+          </div>
+        </div>
+      </div>
+
+      {pendientes.length === 0 && (
+        <div style={S.vacio}>¡Todos los fijos de {nombreMes(mes).toLowerCase()} están pagados! 🎉</div>
+      )}
+
+      {gruposPendientes.map((g) => (
+        <div key={g} style={{ marginBottom: 16 }}>
+          <div style={S.fechaHeader}>{g}</div>
+          {pendientes.filter((x) => x.fijo.grupo === g).map(({ fijo: f }) => {
+            const enEdicion = editandoFijo === f.id;
+            return (
+              <div key={f.id} style={{ ...S.movFila, borderLeft: `3px solid ${C.ambar}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, color: C.tinta, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {f.categoria}
+                    {f.venceDia && (mes < mesActual() || (mes === mesActual() && diaHoy() > f.venceDia)) && (
+                      <span style={S.badgeVencido}>VENCIDO</span>
+                    )}
+                  </div>
+                  {f.datos && <div style={{ fontSize: 12, color: C.gris }}>{f.datos}</div>}
+                  <div style={{ fontSize: 12.5, color: C.ambar }}>
+                    Pendiente{f.venceDia ? ` · vence el ${f.venceDia}` : ""}
+                  </div>
+                </div>
+                {pagando === f.id || enEdicion ? null : (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={{ ...S.btnSecundario, padding: "7px 14px", fontSize: 13 }} onClick={() => { setPagando(f.id); setMonto(""); setCuentaId(""); }}>
+                      Pagar
+                    </button>
+                    <button style={S.btnMini} onClick={() => { setEditandoFijo(f.id); setEfNombre(f.categoria); setEfGrupo(f.grupo); setEfVence(f.venceDia ? String(f.venceDia) : ""); setEfDatos(f.datos || ""); }}>editar</button>
+                  </div>
+                )}
+
+                {enEdicion && (
+                  <div style={{ width: "100%", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${C.linea}` }}>
+                    <label style={{ ...S.label, marginTop: 0 }}>Nombre</label>
+                    <input style={S.input} value={efNombre} onChange={(e) => setEfNombre(e.target.value)} autoFocus />
+                    <label style={{ ...S.label, marginTop: 0 }}>Grupo</label>
+                    <div style={S.chips}>
+                      {gruposElegibles.map((g2) => (
+                        <Chip key={g2.nombre} activo={efGrupo === g2.nombre} onClick={() => setEfGrupo(g2.nombre)}>{g2.nombre}</Chip>
+                      ))}
+                    </div>
+                    <label style={{ ...S.label, marginTop: 6 }}>Día del mes en que vence (opcional)</label>
+                    <input style={S.input} inputMode="numeric" placeholder="Ej: 10" value={efVence} onChange={(e) => setEfVence(e.target.value)} />
+                    <label style={{ ...S.label, marginTop: 0 }}>Datos del servicio (opcional)</label>
+                    <input style={S.input} placeholder="Ej: N° de usuario 12345 · Línea 011-4567-8900" value={efDatos} onChange={(e) => setEfDatos(e.target.value)} />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button style={{ ...S.btnPrimario, flex: 1, marginTop: 0 }} onClick={() => guardarEdicionFijo(f)}>Guardar cambios</button>
+                      <button style={S.btnSecundario} onClick={() => setEditandoFijo(null)}>Cancelar</button>
+                      <button style={{ ...S.btnSecundario, color: C.gasto }} onClick={() => { setEditandoFijo(null); quitarFijo(f); }}>Quitar</button>
+                    </div>
+                  </div>
+                )}
+
+                {pagando === f.id && (
+                  <div style={{ width: "100%", marginTop: 8 }}>
+                    <input
+                      style={S.input}
+                      inputMode="decimal"
+                      placeholder="¿Cuánto salió este mes?"
+                      value={monto}
+                      onChange={(e) => setMonto(e.target.value)}
+                      autoFocus
+                    />
+                    <label style={{ ...S.label, marginTop: 0 }}>¿De dónde sale?</label>
+                    <div style={S.chips}>
+                      {data.cuentas.map((c) => (
+                        <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaId(c.id)}>
+                          {etiquetaCuenta(c)}
+                        </Chip>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button
+                        style={{ ...S.btnPrimario, flex: 1, marginTop: 0, background: parseMonto(monto) > 0 && cuentaId ? C.lav : C.linea }}
+                        onClick={() => pagar(f)}
+                        disabled={!(parseMonto(monto) > 0 && cuentaId)}
+                      >
+                        Registrar pago
+                      </button>
+                      <button style={S.btnSecundario} onClick={() => setPagando(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
+      {pagadosLista.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <button style={{ ...S.acordeonHeader, background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 12 }} onClick={() => setVerPagados(!verPagados)}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.lav }}>
+              <span style={{ marginRight: 8, fontSize: 13 }}>{verPagados ? "▾" : "▸"}</span>
+              ✓ Ya pagados este mes ({pagadosLista.length})
+            </span>
+          </button>
+          {verPagados && pagadosLista.map(({ fijo: f, mov }) => (
+            <div key={f.id} style={{ ...S.movFila, borderLeft: `3px solid ${C.lav}`, marginTop: 8, opacity: 0.85 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tinta }}>{f.categoria}</div>
+                <div style={{ fontSize: 12.5, color: C.lav }}>
+                  Pagado · {fmt(mov.monto, monedaDelMov(mov, data.cuentas))} · {etiquetaCuenta(data.cuentas.find((c) => c.id === mov.cuentaId))}
+                </div>
+              </div>
+              <button style={S.btnMini} onClick={() => deshacer(f, mov)}>deshacer</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {nuevoFijo ? (
+        <div style={S.card}>
+          <label style={{ ...S.label, marginTop: 0 }}>Nombre del gasto fijo</label>
+          <input style={S.input} placeholder="Ej: Seguro, gimnasio…" value={nfNombre} onChange={(e) => setNfNombre(e.target.value)} />
+          <label style={{ ...S.label, marginTop: 0 }}>Grupo</label>
+          <div style={S.chips}>
+            {gruposElegibles.map((g) => (
+              <Chip key={g.nombre} activo={nfGrupo === g.nombre} onClick={() => setNfGrupo(g.nombre)}>{g.nombre}</Chip>
+            ))}
+          </div>
+          <label style={{ ...S.label, marginTop: 6 }}>Día del mes en que vence (opcional)</label>
+          <input style={S.input} inputMode="numeric" placeholder="Ej: 10" value={nfVence} onChange={(e) => setNfVence(e.target.value)} />
+          <label style={{ ...S.label, marginTop: 0 }}>Datos del servicio (opcional)</label>
+          <input style={S.input} placeholder="Ej: N° de usuario 12345" value={nfDatos} onChange={(e) => setNfDatos(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button style={{ ...S.btnPrimario, flex: 1, marginTop: 0 }} onClick={agregarFijo}>Agregar</button>
+            <button style={S.btnSecundario} onClick={() => setNuevoFijo(false)}>Cancelar</button>
+          </div>
+        </div>
+      ) : (
+        <button style={{ ...S.btnSecundario, width: "100%" }} onClick={() => setNuevoFijo(true)}>+ Nuevo gasto fijo</button>
+      )}
+    </div>
+  );
+}
+
+// ————— Resumen mensual con desplegables —————
+function Resumen({ data }) {
+  const [mes, setMes] = useState(mesActual());
+  const [abiertos, setAbiertos] = useState({});
+
+  const toggle = (k) => setAbiertos((a) => ({ ...a, [k]: !a[k] }));
+
+  const movsMes = data.movs.filter((m) => m.fecha.slice(0, 7) === mes);
+  const nombreCta = (id) => etiquetaCuenta(data.cuentas.find((x) => x.id === id));
+
+  const suma = (movs) =>
+    movs.reduce((acc, m) => {
+      const mon = monedaDelMov(m, data.cuentas);
+      acc[mon] = (acc[mon] || 0) + m.monto;
+      return acc;
+    }, {});
+
+  const fmtSuma = (s) => {
+    const partes = Object.entries(s).filter(([, v]) => v > 0);
+    return partes.length === 0 ? "—" : partes.map(([m, v]) => fmt(v, m)).join(" · ");
+  };
+
+  const gastos = movsMes.filter((m) => m.tipo === "gasto");
+  const ingresos = movsMes.filter((m) => m.tipo === "ingreso");
+
+  const ordenGrupos = data.grupos.map((g) => g.nombre);
+  const gruposDelMes = [...new Set(gastos.map((m) => m.grupo || "Otros"))].sort(
+    (a, b) => ordenGrupos.indexOf(a) - ordenGrupos.indexOf(b)
+  );
+
+  const tarjetas = data.cuentas.filter((c) => c.clase === "credito");
+  const consumosTarjeta = (tid) => gastos.filter((m) => m.cuentaId === tid);
+  const pagosTarjeta = (tid) => movsMes.filter((m) => m.tipo === "transfer" && m.cuentaDestinoId === tid);
+
+  return (
+    <div style={{ paddingBottom: 90 }}>
+      <SelectorMes mes={mes} setMes={setMes} />
+
+      <div style={{ ...S.card, display: "flex", gap: 24, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12, color: C.tintaSuave, textTransform: "uppercase", letterSpacing: "0.06em" }}>Ingresos</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: C.ingreso, fontVariantNumeric: "tabular-nums" }}>{fmtSuma(suma(ingresos))}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: C.tintaSuave, textTransform: "uppercase", letterSpacing: "0.06em" }}>Gastos</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: C.gasto, fontVariantNumeric: "tabular-nums" }}>{fmtSuma(suma(gastos))}</div>
+        </div>
+      </div>
+
+      <div style={S.fechaHeader}>Gastos por grupo — tocá para abrir</div>
+
+      {gruposDelMes.length === 0 && <div style={S.vacio}>Sin gastos anotados en {nombreMes(mes).toLowerCase()}.</div>}
+
+      {gruposDelMes.map((g) => {
+        const movsGrupo = gastos.filter((m) => (m.grupo || "Otros") === g);
+        const abierto = abiertos[g];
+        const cats = [...new Set(movsGrupo.map((m) => m.categoria))];
+        return (
+          <div key={g} style={{ ...S.card, padding: 0, overflow: "hidden" }}>
+            <button style={S.acordeonHeader} onClick={() => toggle(g)}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: C.tinta }}>
+                <span style={{ color: C.lav, marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
+                {g}
+              </span>
+              <span style={{ fontSize: 14.5, fontWeight: 700, color: C.gasto, fontVariantNumeric: "tabular-nums" }}>
+                {fmtSuma(suma(movsGrupo))}
+              </span>
+            </button>
+            {abierto && (
+              <div style={{ borderTop: `1px solid ${C.linea}` }}>
+                {cats.map((cat) => {
+                  const movsCat = movsGrupo.filter((m) => m.categoria === cat);
+                  const kCat = `${g}|${cat}`;
+                  const abiertoCat = abiertos[kCat];
+                  return (
+                    <div key={cat}>
+                      <button style={{ ...S.acordeonHeader, padding: "10px 16px 10px 28px", background: "#FAF9FC" }} onClick={() => toggle(kCat)}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: C.tinta }}>
+                          <span style={{ color: C.gris, marginRight: 6, fontSize: 12 }}>{abiertoCat ? "▾" : "▸"}</span>
+                          {cat}
+                          <span style={{ color: C.gris, fontWeight: 500, marginLeft: 6, fontSize: 12.5 }}>
+                            {movsCat.length > 1 ? `· ${movsCat.length} movs` : ""}
+                          </span>
+                        </span>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.tinta, fontVariantNumeric: "tabular-nums" }}>
+                          {fmtSuma(suma(movsCat))}
+                        </span>
+                      </button>
+                      {abiertoCat && movsCat.map((m) => (
+                        <div key={m.id} style={{ display: "flex", justifyContent: "space-between", padding: "7px 16px 7px 44px", fontSize: 13, color: C.tintaSuave, borderTop: `1px dashed ${C.linea}` }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 10 }}>
+                            {fmtFecha(m.fecha)} · {nombreCta(m.cuentaId)}{m.nota ? ` · ${m.nota}` : ""}
+                          </span>
+                          <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmt(m.monto, monedaDelMov(m, data.cuentas))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {tarjetas.length > 0 && (
+        <React.Fragment>
+          <div style={{ ...S.fechaHeader, marginTop: 20 }}>Tarjetas este mes</div>
+          {tarjetas.map((t) => {
+            const consumos = consumosTarjeta(t.id);
+            const pagos = pagosTarjeta(t.id);
+            const k = `tarjeta|${t.id}`;
+            const abierto = abiertos[k];
+            if (consumos.length === 0 && pagos.length === 0) return null;
+            return (
+              <div key={t.id} style={{ ...S.card, padding: 0, overflow: "hidden", borderLeft: `4px solid ${colorEntidad(t.entidad)}` }}>
+                <button style={S.acordeonHeader} onClick={() => toggle(k)}>
+                  <span style={{ fontSize: 14.5, fontWeight: 700, color: C.tinta }}>
+                    <span style={{ color: colorEntidad(t.entidad), marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
+                    {t.entidad} · {t.nombre}
+                  </span>
+                  <span style={{ fontSize: 13, color: C.gris }}>
+                    {consumos.length} consumos · {pagos.length} pagos
+                  </span>
+                </button>
+                {abierto && (
+                  <div style={{ borderTop: `1px solid ${C.linea}`, padding: "8px 16px 12px" }}>
+                    <div style={{ fontSize: 13, color: C.tintaSuave, marginBottom: 4 }}>
+                      Consumos: <b style={{ color: C.gasto }}>{fmtSuma(suma(consumos))}</b>
+                    </div>
+                    <div style={{ fontSize: 13, color: C.tintaSuave }}>
+                      Pagos hechos: <b style={{ color: C.ingreso }}>{pagos.length === 0 ? "—" : pagos.map((p) => `${fmt(p.monto, (data.cuentas.find((c) => c.id === p.cuentaId) || {}).moneda || "ARS")} desde ${nombreCta(p.cuentaId)}`).join(" · ")}</b>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+function SelectorMes({ mes, setMes }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <button style={S.btnSecundario} onClick={() => setMes(mesAnterior(mes))}>‹</button>
+      <div style={{ fontSize: 16, fontWeight: 800, color: C.lavOscuro }}>{nombreMes(mes)}</div>
+      <button
+        style={{ ...S.btnSecundario, opacity: mes >= mesActual() ? 0.35 : 1 }}
+        onClick={() => mes < mesActual() && setMes(mesSiguiente(mes))}
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+// ————— Historial —————
+function Historial({ data, guardar, avisar }) {
+  const [filtroCuenta, setFiltroCuenta] = useState("");
+  const [confirmar, setConfirmar] = useState(null);
+  const [editando, setEditando] = useState(null);
+
+  const movs = data.movs.filter((m) => !filtroCuenta || m.cuentaId === filtroCuenta || m.cuentaDestinoId === filtroCuenta);
+  const nombreCta = (id) => etiquetaCuenta(data.cuentas.find((x) => x.id === id));
+
+  const guardarEdicion = (id, cambios) => {
+    guardar({ ...data, movs: data.movs.map((m) => (m.id === id ? { ...m, ...cambios } : m)) });
+    setEditando(null);
+    avisar("Movimiento actualizado ✓");
+  };
+
+  const borrar = (id) => {
+    const nuevosPagosFijos = {};
+    Object.entries(data.pagosFijos).forEach(([mes, pagos]) => {
+      const limpio = {};
+      Object.entries(pagos).forEach(([fid, mid]) => { if (mid !== id) limpio[fid] = mid; });
+      nuevosPagosFijos[mes] = limpio;
+    });
+    guardar({ ...data, movs: data.movs.filter((m) => m.id !== id), pagosFijos: nuevosPagosFijos });
+    setConfirmar(null);
+    avisar("Movimiento borrado — balances actualizados");
+  };
+
+  const porFecha = movs.reduce((acc, m) => { (acc[m.fecha] = acc[m.fecha] || []).push(m); return acc; }, {});
+  const fechas = Object.keys(porFecha).sort().reverse();
+
+  return (
+    <div style={{ paddingBottom: 90 }}>
+      <div style={{ ...S.chips, marginBottom: 16 }}>
+        <Chip activo={!filtroCuenta} onClick={() => setFiltroCuenta("")}>Todas</Chip>
+        {data.cuentas.map((c) => (
+          <Chip key={c.id} activo={filtroCuenta === c.id} dot={colorEntidad(c.entidad)} onClick={() => setFiltroCuenta(c.id)}>
+            {etiquetaCuenta(c)}
+          </Chip>
+        ))}
+      </div>
+
+      {fechas.length === 0 && <div style={S.vacio}>Todavía no hay movimientos acá. Anotá el primero desde Inicio.</div>}
+
+      {fechas.map((f) => (
+        <div key={f} style={{ marginBottom: 18 }}>
+          <div style={S.fechaHeader}>{fmtFecha(f)}</div>
+          {porFecha[f].map((m) => {
+            const ctaMov = data.cuentas.find((c) => c.id === m.cuentaId);
+            const enEdicion = editando === m.id;
+            return (
+              <div key={m.id} style={{ ...S.movFila, flexWrap: "wrap" }}>
+                <div style={{
+                  width: 4, alignSelf: "stretch", borderRadius: 2,
+                  background: ctaMov ? colorEntidad(ctaMov.entidad) : C.gris,
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, color: C.tinta, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.nota || m.categoria}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: C.tintaSuave, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.tipo === "transfer"
+                      ? `${nombreCta(m.cuentaId)} → ${nombreCta(m.cuentaDestinoId)}`
+                      : `${m.grupo ? m.grupo + " · " : ""}${m.categoria} · ${nombreCta(m.cuentaId)}`}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{
+                    fontSize: 14.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                    color: m.tipo === "gasto" ? C.gasto : m.tipo === "ingreso" ? C.ingreso : C.transfer,
+                  }}>
+                    {m.tipo === "gasto" ? "−" : m.tipo === "ingreso" ? "+" : ""}{fmt(m.monto, monedaDelMov(m, data.cuentas))}
+                  </div>
+                  {confirmar === m.id ? (
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 2 }}>
+                      <button style={{ ...S.btnMini, color: C.gasto }} onClick={() => borrar(m.id)}>Sí, borrar</button>
+                      <button style={S.btnMini} onClick={() => setConfirmar(null)}>No</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button style={S.btnMini} onClick={() => setEditando(enEdicion ? null : m.id)}>editar</button>
+                      <button style={S.btnMini} onClick={() => setConfirmar(m.id)}>borrar</button>
+                    </div>
+                  )}
+                </div>
+                {enEdicion && (
+                  <EditarMovimiento
+                    mov={m}
+                    data={data}
+                    onGuardar={(cambios) => guardarEdicion(m.id, cambios)}
+                    onCancelar={() => setEditando(null)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ————— Editar un movimiento ya cargado —————
+function EditarMovimiento({ mov, data, onGuardar, onCancelar }) {
+  const [monto, setMonto] = useState(String(mov.monto));
+  const [fecha, setFecha] = useState(mov.fecha);
+  const [nota, setNota] = useState(mov.nota || "");
+  const [cuentaId, setCuentaId] = useState(mov.cuentaId);
+  const [grupo, setGrupo] = useState(mov.grupo || "Diarios");
+  const [categoria, setCategoria] = useState(mov.categoria || "");
+  const [monedaMov, setMonedaMov] = useState(mov.monedaMov || "");
+
+  const esGasto = mov.tipo === "gasto";
+  const esIngreso = mov.tipo === "ingreso";
+  const cta = data.cuentas.find((c) => c.id === cuentaId);
+  const esTarjeta = cta && cta.clase === "credito";
+  const catsDelGrupo = (data.grupos.find((g) => g.nombre === grupo) || { categorias: [] }).categorias;
+  const catsIngreso = (data.grupos.find((g) => g.nombre === "Ingresos") || { categorias: [] }).categorias;
+  const gruposGasto = data.grupos.filter((g) => g.nombre !== "Ingresos");
+
+  const listo = () => {
+    const m = parseMonto(monto);
+    if (isNaN(m) || m <= 0 || !cuentaId || !fecha) return false;
+    if (esGasto && !categoria) return false;
+    return true;
+  };
+
+  return (
+    <div style={{ width: "100%", marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.linea}` }}>
+      <label style={{ ...S.label, marginTop: 0 }}>Monto</label>
+      <input style={S.input} inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} autoFocus />
+
+      <label style={{ ...S.label, marginTop: 0 }}>Fecha</label>
+      <input style={S.input} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+
+      <label style={{ ...S.label, marginTop: 0 }}>{mov.tipo === "transfer" ? "Desde" : esIngreso ? "Entra a" : "Sale de"}</label>
+      <div style={S.chips}>
+        {data.cuentas.map((c) => (
+          <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaId(c.id)}>
+            {etiquetaCuenta(c)}
+          </Chip>
+        ))}
+      </div>
+
+      {esGasto && esTarjeta && (
+        <React.Fragment>
+          <label style={S.label}>Moneda del consumo</label>
+          <div style={S.chips}>
+            <Chip activo={(monedaMov || cta.moneda) === "ARS"} onClick={() => setMonedaMov("ARS")}>Pesos</Chip>
+            <Chip activo={(monedaMov || cta.moneda) === "USD"} onClick={() => setMonedaMov("USD")}>Dólares</Chip>
+          </div>
+        </React.Fragment>
+      )}
+
+      {esGasto && (
+        <React.Fragment>
+          <label style={S.label}>Grupo</label>
+          <div style={S.chips}>
+            {gruposGasto.map((g) => (
+              <Chip key={g.nombre} activo={grupo === g.nombre} onClick={() => { setGrupo(g.nombre); setCategoria(""); }}>{g.nombre}</Chip>
+            ))}
+          </div>
+          <label style={S.label}>Categoría</label>
+          <div style={S.chips}>
+            {catsDelGrupo.map((cat) => (
+              <Chip key={cat} activo={categoria === cat} onClick={() => setCategoria(cat)}>{cat}</Chip>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      {esIngreso && (
+        <React.Fragment>
+          <label style={S.label}>Categoría</label>
+          <div style={S.chips}>
+            {catsIngreso.map((cat) => (
+              <Chip key={cat} activo={categoria === cat} onClick={() => setCategoria(cat)}>{cat}</Chip>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+
+      <label style={{ ...S.label }}>Nota</label>
+      <input style={S.input} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional" />
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          style={{ ...S.btnPrimario, flex: 1, marginTop: 0, background: listo() ? C.lav : C.linea }}
+          disabled={!listo()}
+          onClick={() => {
+            const cambios = {
+              monto: parseMonto(monto),
+              fecha,
+              nota: nota.trim(),
+              cuentaId,
+            };
+            if (esGasto) { cambios.grupo = grupo; cambios.categoria = categoria; }
+            if (esIngreso) cambios.categoria = categoria || "Otros ingresos";
+            if (esGasto && esTarjeta) cambios.monedaMov = monedaMov || cta.moneda;
+            onGuardar(cambios);
+          }}
+        >
+          Guardar cambios
+        </button>
+        <button style={S.btnSecundario} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+// ————— Cuentas —————
+function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
+  const [editando, setEditando] = useState(null);
+  const [pagandoTarjeta, setPagandoTarjeta] = useState(null);
+  const [mostrarNueva, setMostrarNueva] = useState(false);
+
+  const entidades = [...new Set(data.cuentas.map((c) => c.entidad))];
+  const pagadaEsteMes = (id) =>
+    data.movs.some((m) => m.tipo === "transfer" && m.cuentaDestinoId === id && m.fecha.slice(0, 7) === mesActual());
+
+  return (
+    <div style={{ paddingBottom: 90 }}>
+      {entidades.map((ent) => {
+        const col = colorEntidad(ent);
+        return (
+          <div key={ent} style={{ marginBottom: 18 }}>
+            <div style={{ ...S.fechaHeader, display: "flex", alignItems: "center", gap: 7, color: col }}>
+              <span style={{ width: 10, height: 10, borderRadius: 5, background: col, display: "inline-block" }} />
+              {ent}
+            </div>
+            {data.cuentas.filter((c) => c.entidad === ent).map((c) => {
+              const esTarjeta = c.clase === "credito";
+              const d = deudasTarjetas[c.id] || { ARS: 0, USD: 0 };
+              const conDeuda = esTarjeta && (d.ARS > 0 || d.USD > 0);
+              const pagada = esTarjeta && pagadaEsteMes(c.id);
+              const vencida = esTarjeta && c.venceDia && conDeuda && diaHoy() > c.venceDia && !pagada;
+              return (
+                <div key={c.id} style={{ ...S.movFila, flexDirection: "column", alignItems: "stretch", gap: 0, borderLeft: `4px solid ${col}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: C.tinta, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {c.nombre}
+                        {vencida && <span style={S.badgeVencido}>VENCIDO</span>}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: C.tintaSuave }}>{CLASES[c.clase]} · {c.moneda === "USD" ? "Dólares" : "Pesos"}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      {esTarjeta ? (
+                        <div style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: conDeuda ? C.gasto : C.tinta }}>
+                          {!conDeuda
+                            ? "Sin deuda ✓"
+                            : [d.ARS > 0 && `Debés ${fmt(d.ARS, "ARS")}`, d.USD > 0 && `Debés ${fmt(d.USD, "USD")}`].filter(Boolean).join(" · ")}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: C.tinta }}>
+                          {fmt(balances[c.id] || 0, c.moneda)}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                        <button style={S.btnMini} onClick={() => setEditando(editando === c.id ? null : c.id)}>editar</button>
+                        {esTarjeta && (
+                          <button style={{ ...S.btnMini, color: C.lav, fontWeight: 700 }} onClick={() => setPagandoTarjeta(pagandoTarjeta === c.id ? null : c.id)}>
+                            Pagar tarjeta
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {esTarjeta && (
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${C.linea}` }}>
+                      {c.cierreDia && (
+                        <MiniDato
+                          titulo="Cierra"
+                          valor={`${fechaDelDia(c.cierreDia)} · ${diasHastaDia(c.cierreDia) === 0 ? "hoy" : "en " + diasHastaDia(c.cierreDia) + " días"}`}
+                        />
+                      )}
+                      {c.venceDia && (
+                        <MiniDato
+                          titulo="Vence"
+                          valor={`${fechaDelDia(c.venceDia)}${vencida ? "" : " · " + (diasHastaDia(c.venceDia) === 0 ? "hoy" : "en " + diasHastaDia(c.venceDia) + " días")}`}
+                          color={vencida ? C.gasto : undefined}
+                        />
+                      )}
+                      <MiniDato
+                        titulo="Este mes"
+                        valor={pagada ? "Pagada ✓" : conDeuda ? "Sin pagar" : "Sin deuda"}
+                        color={pagada ? C.ingreso : conDeuda ? C.ambar : C.ingreso}
+                      />
+                      <MiniDato
+                        titulo="Acumulado"
+                        valor={!conDeuda ? "—" : [d.ARS > 0 && fmt(d.ARS, "ARS"), d.USD > 0 && fmt(d.USD, "USD")].filter(Boolean).join(" + ")}
+                        color={conDeuda ? C.gasto : undefined}
+                      />
+                    </div>
+                  )}
+
+                  {editando === c.id && (
+                    <EditarCuenta
+                      cuenta={c}
+                      tieneMovs={data.movs.some((m) => m.cuentaId === c.id || m.cuentaDestinoId === c.id)}
+                      onGuardar={(cambios) => {
+                        guardar({ ...data, cuentas: data.cuentas.map((x) => (x.id === c.id ? { ...x, ...cambios } : x)) });
+                        setEditando(null);
+                        avisar("Cuenta actualizada");
+                      }}
+                      onBorrar={() => {
+                        guardar({ ...data, cuentas: data.cuentas.filter((x) => x.id !== c.id) });
+                        setEditando(null);
+                        avisar("Cuenta eliminada");
+                      }}
+                      onCancelar={() => setEditando(null)}
+                    />
+                  )}
+
+                  {pagandoTarjeta === c.id && (
+                    <PagarTarjeta
+                      tarjeta={c}
+                      data={data}
+                      deuda={d}
+                      onPagar={(mov) => {
+                        guardar({ ...data, movs: [mov, ...data.movs] });
+                        setPagandoTarjeta(null);
+                        avisar("Pago de tarjeta anotado ✓");
+                      }}
+                      onCancelar={() => setPagandoTarjeta(null)}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {mostrarNueva ? (
+        <NuevaCuenta
+          onCrear={(cta) => {
+            guardar({ ...data, cuentas: [...data.cuentas, cta] });
+            setMostrarNueva(false);
+            avisar(`Cuenta "${cta.nombre}" creada`);
+          }}
+          onCancelar={() => setMostrarNueva(false)}
+        />
+      ) : (
+        <button style={{ ...S.btnSecundario, width: "100%" }} onClick={() => setMostrarNueva(true)}>+ Nueva cuenta</button>
+      )}
+
+      <GruposYCategorias data={data} guardar={guardar} avisar={avisar} />
+      <SeccionDeudas data={data} guardar={guardar} avisar={avisar} />
+      <Respaldo data={data} guardar={guardar} avisar={avisar} />
+      <EmpezarDeNuevo data={data} guardar={guardar} avisar={avisar} />
+    </div>
+  );
+}
+
+function MiniDato({ titulo, valor, color }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.gris }}>{titulo}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: color || C.tinta, fontVariantNumeric: "tabular-nums" }}>{valor}</div>
+    </div>
+  );
+}
+
+function EditarCuenta({ cuenta, tieneMovs, onGuardar, onBorrar, onCancelar }) {
+  const [nombre, setNombre] = useState(cuenta.nombre);
+  const [entidad, setEntidad] = useState(cuenta.entidad);
+  const [clase, setClase] = useState(cuenta.clase);
+  const [moneda, setMoneda] = useState(cuenta.moneda);
+  const [inicial, setInicial] = useState(String(cuenta.inicial || 0));
+  const [cierre, setCierre] = useState(cuenta.cierreDia ? String(cuenta.cierreDia) : "");
+  const [vence, setVence] = useState(cuenta.venceDia ? String(cuenta.venceDia) : "");
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.linea}` }}>
+      <label style={{ ...S.label, marginTop: 0 }}>Nombre</label>
+      <input style={S.input} value={nombre} onChange={(e) => setNombre(e.target.value)} />
+      <label style={{ ...S.label, marginTop: 0 }}>Banco o entidad</label>
+      <input style={S.input} value={entidad} onChange={(e) => setEntidad(e.target.value)} />
+      <label style={{ ...S.label, marginTop: 0 }}>Tipo</label>
+      <div style={S.chips}>
+        {Object.entries(CLASES).map(([k, label]) => (
+          <Chip key={k} activo={clase === k} onClick={() => !tieneMovs && setClase(k)}>{label}</Chip>
+        ))}
+      </div>
+      <label style={S.label}>Moneda {clase === "credito" ? "(principal de la tarjeta)" : ""}</label>
+      <div style={S.chips}>
+        <Chip activo={moneda === "ARS"} onClick={() => !tieneMovs && setMoneda("ARS")}>Pesos</Chip>
+        <Chip activo={moneda === "USD"} onClick={() => !tieneMovs && setMoneda("USD")}>Dólares</Chip>
+      </div>
+      {tieneMovs && (
+        <div style={{ fontSize: 12, color: C.gris, marginBottom: 8 }}>
+          El tipo y la moneda no se pueden cambiar porque la cuenta ya tiene movimientos. El nombre y la entidad sí. Y recordá: en las tarjetas, cada consumo puede ser en pesos o en dólares — se elige al cargarlo.
+        </div>
+      )}
+      {clase === "credito" && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ ...S.label, marginTop: 0 }}>Día que cierra</label>
+            <input style={S.input} inputMode="numeric" placeholder="Ej: 22" value={cierre} onChange={(e) => setCierre(e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ ...S.label, marginTop: 0 }}>Día que vence</label>
+            <input style={S.input} inputMode="numeric" placeholder="Ej: 3" value={vence} onChange={(e) => setVence(e.target.value)} />
+          </div>
+        </div>
+      )}
+      <label style={{ ...S.label, marginTop: 0 }}>
+        {clase === "credito" ? "Deuda actual (en negativo, ej: -50000)" : "Saldo con el que arranca"}
+      </label>
+      <input style={S.input} inputMode="decimal" value={inicial} onChange={(e) => setInicial(e.target.value)} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          style={{ ...S.btnPrimario, flex: 1, marginTop: 0 }}
+          onClick={() => {
+            const t = inicial.trim();
+            const v = t === "" ? 0 : t.startsWith("-") ? -parseMonto(t.slice(1)) : parseMonto(t);
+            if (isNaN(v) || !nombre.trim() || !entidad.trim()) return;
+            const cd = parseInt(cierre, 10);
+            const vd = parseInt(vence, 10);
+            onGuardar({
+              nombre: nombre.trim(), entidad: entidad.trim(), clase, moneda, inicial: v,
+              cierreDia: cd >= 1 && cd <= 31 ? cd : null,
+              venceDia: vd >= 1 && vd <= 31 ? vd : null,
+            });
+          }}
+        >
+          Guardar
+        </button>
+        <button style={S.btnSecundario} onClick={onCancelar}>Cancelar</button>
+        {!tieneMovs && (
+          <button style={{ ...S.btnSecundario, color: C.gasto }} onClick={onBorrar}>Eliminar</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PagarTarjeta({ tarjeta, data, deuda, onPagar, onCancelar }) {
+  const [monedaParte, setMonedaParte] = useState(deuda && deuda.USD > 0 && deuda.ARS <= 0 ? "USD" : tarjeta.moneda);
+  const [monto, setMonto] = useState("");
+  const [cuentaId, setCuentaId] = useState("");
+  const [montoDestino, setMontoDestino] = useState("");
+
+  const origen = data.cuentas.find((c) => c.id === cuentaId);
+  const cruzaMoneda = origen && origen.moneda !== monedaParte;
+
+  const listo = () => {
+    const m = parseMonto(monto);
+    if (isNaN(m) || m <= 0 || !cuentaId) return false;
+    if (cruzaMoneda && (isNaN(parseMonto(montoDestino)) || parseMonto(montoDestino) <= 0)) return false;
+    return true;
+  };
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.linea}` }}>
+      {deuda && deuda.ARS > 0 && deuda.USD > 0 && (
+        <div style={{ fontSize: 12.5, color: C.tintaSuave, marginBottom: 6 }}>
+          Esta tarjeta tiene deuda en pesos y en dólares. Registrá cada parte por separado.
+        </div>
+      )}
+      <label style={{ ...S.label, marginTop: 0 }}>¿Qué parte del resumen pagás?</label>
+      <div style={S.chips}>
+        <Chip activo={monedaParte === "ARS"} onClick={() => setMonedaParte("ARS")}>La parte en pesos{deuda && deuda.ARS > 0 ? ` (${fmt(deuda.ARS, "ARS")})` : ""}</Chip>
+        <Chip activo={monedaParte === "USD"} onClick={() => setMonedaParte("USD")}>La parte en dólares{deuda && deuda.USD > 0 ? ` (${fmt(deuda.USD, "USD")})` : ""}</Chip>
+      </div>
+      <label style={{ ...S.label, marginTop: 0 }}>¿Cuánto sale de tu cuenta{origen ? ` (en ${origen.moneda === "USD" ? "dólares" : "pesos"})` : ""}?</label>
+      <input style={S.input} inputMode="decimal" placeholder="Monto del pago" value={monto} onChange={(e) => setMonto(e.target.value)} autoFocus />
+      <label style={{ ...S.label, marginTop: 0 }}>¿De dónde sale el dinero?</label>
+      <div style={S.chips}>
+        {data.cuentas.filter((c) => c.id !== tarjeta.id && c.clase !== "credito").map((c) => (
+          <Chip key={c.id} activo={cuentaId === c.id} dot={colorEntidad(c.entidad)} onClick={() => setCuentaId(c.id)}>
+            {etiquetaCuenta(c)}
+          </Chip>
+        ))}
+      </div>
+      {cruzaMoneda && (
+        <React.Fragment>
+          <label style={S.label}>¿Cuánto se acredita a la tarjeta en {monedaParte === "USD" ? "dólares" : "pesos"}?</label>
+          <input style={S.input} inputMode="decimal" value={montoDestino} onChange={(e) => setMontoDestino(e.target.value)} />
+        </React.Fragment>
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button
+          style={{ ...S.btnPrimario, flex: 1, marginTop: 0, background: listo() ? C.lav : C.linea }}
+          disabled={!listo()}
+          onClick={() => {
+            const mov = {
+              id: uid(),
+              tipo: "transfer",
+              monto: parseMonto(monto),
+              cuentaId,
+              cuentaDestinoId: tarjeta.id,
+              fecha: hoy(),
+              grupo: "Tarjetas",
+              categoria: "Pago de tarjeta",
+              nota: `Pago tarjeta ${tarjeta.entidad} (parte ${monedaParte === "USD" ? "USD" : "$"})`,
+              monedaPagoTarjeta: monedaParte,
+            };
+            if (cruzaMoneda) mov.montoDestino = parseMonto(montoDestino);
+            onPagar(mov);
+          }}
+        >
+          Registrar pago
+        </button>
+        <button style={S.btnSecundario} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+function NuevaCuenta({ onCrear, onCancelar }) {
+  const [nombre, setNombre] = useState("");
+  const [entidad, setEntidad] = useState("");
+  const [clase, setClase] = useState("ahorro");
+  const [moneda, setMoneda] = useState("ARS");
+  const [inicial, setInicial] = useState("");
+
+  return (
+    <div style={S.card}>
+      <label style={{ ...S.label, marginTop: 0 }}>Banco o entidad</label>
+      <input style={S.input} placeholder="Ej: Banco Nación, Ualá…" value={entidad} onChange={(e) => setEntidad(e.target.value)} />
+      <label style={{ ...S.label, marginTop: 0 }}>Nombre de la cuenta</label>
+      <input style={S.input} placeholder="Ej: Caja de ahorro $" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+      <label style={{ ...S.label, marginTop: 0 }}>Tipo</label>
+      <div style={S.chips}>
+        {Object.entries(CLASES).map(([k, label]) => (
+          <Chip key={k} activo={clase === k} onClick={() => setClase(k)}>{label}</Chip>
+        ))}
+      </div>
+      <label style={S.label}>Moneda</label>
+      <div style={S.chips}>
+        <Chip activo={moneda === "ARS"} onClick={() => setMoneda("ARS")}>Pesos</Chip>
+        <Chip activo={moneda === "USD"} onClick={() => setMoneda("USD")}>Dólares</Chip>
+      </div>
+      <label style={S.label}>Saldo actual (opcional)</label>
+      <input style={S.input} inputMode="decimal" placeholder="0" value={inicial} onChange={(e) => setInicial(e.target.value)} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          style={{ ...S.btnPrimario, flex: 1, marginTop: 0 }}
+          disabled={!nombre.trim() || !entidad.trim()}
+          onClick={() => {
+            const v = inicial === "" ? 0 : parseMonto(inicial);
+            if (inicial !== "" && isNaN(v)) return;
+            onCrear({ id: uid(), nombre: nombre.trim(), entidad: entidad.trim(), clase, moneda, inicial: v || 0 });
+          }}
+        >
+          Crear cuenta
+        </button>
+        <button style={S.btnSecundario} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+// ————— Grupos y categorías —————
+function GruposYCategorias({ data, guardar, avisar }) {
+  const [abierto, setAbierto] = useState(false);
+  const [editCat, setEditCat] = useState(null);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [agregandoEn, setAgregandoEn] = useState(null);
+  const [nuevaCat, setNuevaCat] = useState("");
+  const [editGrupo, setEditGrupo] = useState(null);
+  const [nuevoNombreGrupo, setNuevoNombreGrupo] = useState("");
+  const [nuevoGrupo, setNuevoGrupo] = useState("");
+
+  const catEnUso = (grupo, cat) =>
+    data.movs.some((m) => m.grupo === grupo && m.categoria === cat) ||
+    data.fijos.some((f) => f.grupo === grupo && f.categoria === cat);
+
+  const renombrarCategoria = (grupo, viejo) => {
+    const nuevo = nuevoNombre.trim();
+    if (!nuevo || nuevo === viejo) { setEditCat(null); return; }
+    guardar({
+      ...data,
+      grupos: data.grupos.map((g) => (g.nombre === grupo ? { ...g, categorias: g.categorias.map((c) => (c === viejo ? nuevo : c)) } : g)),
+      movs: data.movs.map((m) => (m.grupo === grupo && m.categoria === viejo ? { ...m, categoria: nuevo } : m)),
+      fijos: data.fijos.map((f) => (f.grupo === grupo && f.categoria === viejo ? { ...f, categoria: nuevo } : f)),
+    });
+    setEditCat(null);
+    avisar(`"${viejo}" ahora es "${nuevo}" en todos lados ✓`);
+  };
+
+  const borrarCategoria = (grupo, cat) => {
+    if (catEnUso(grupo, cat)) {
+      avisar("Esa categoría tiene movimientos o fijos — renombrala en vez de borrarla");
+      return;
+    }
+    guardar({
+      ...data,
+      grupos: data.grupos.map((g) => (g.nombre === grupo ? { ...g, categorias: g.categorias.filter((c) => c !== cat) } : g)),
+    });
+    avisar(`Categoría "${cat}" borrada`);
+  };
+
+  const agregarCategoria = (grupo) => {
+    const c = nuevaCat.trim();
+    const g = data.grupos.find((x) => x.nombre === grupo);
+    if (!c || !g || g.categorias.includes(c)) return;
+    guardar({ ...data, grupos: data.grupos.map((x) => (x.nombre === grupo ? { ...x, categorias: [...x.categorias, c] } : x)) });
+    setNuevaCat(""); setAgregandoEn(null);
+    avisar(`Categoría "${c}" agregada a ${grupo}`);
+  };
+
+  const renombrarGrupo = (viejo) => {
+    const nuevo = nuevoNombreGrupo.trim();
+    if (!nuevo || nuevo === viejo || data.grupos.some((g) => g.nombre === nuevo)) { setEditGrupo(null); return; }
+    guardar({
+      ...data,
+      grupos: data.grupos.map((g) => (g.nombre === viejo ? { ...g, nombre: nuevo } : g)),
+      movs: data.movs.map((m) => (m.grupo === viejo ? { ...m, grupo: nuevo } : m)),
+      fijos: data.fijos.map((f) => (f.grupo === viejo ? { ...f, grupo: nuevo } : f)),
+    });
+    setEditGrupo(null);
+    avisar(`Grupo "${viejo}" ahora es "${nuevo}" ✓`);
+  };
+
+  const borrarGrupo = (nombre) => {
+    const g = data.grupos.find((x) => x.nombre === nombre);
+    if (!g) return;
+    const enUso = data.movs.some((m) => m.grupo === nombre) || data.fijos.some((f) => f.grupo === nombre);
+    if (enUso || g.categorias.length > 0) {
+      avisar("Solo se pueden borrar grupos vacíos y sin movimientos");
+      return;
+    }
+    guardar({ ...data, grupos: data.grupos.filter((x) => x.nombre !== nombre) });
+    avisar(`Grupo "${nombre}" borrado`);
+  };
+
+  const agregarGrupo = () => {
+    const n = nuevoGrupo.trim();
+    if (!n || data.grupos.some((g) => g.nombre === n)) return;
+    guardar({ ...data, grupos: [...data.grupos.filter((g) => g.nombre !== "Ingresos"), { nombre: n, categorias: [] }, data.grupos.find((g) => g.nombre === "Ingresos")].filter(Boolean) });
+    setNuevoGrupo("");
+    avisar(`Grupo "${n}" creado`);
+  };
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <button style={{ ...S.acordeonHeader, background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 12 }} onClick={() => setAbierto(!abierto)}>
+        <span style={{ fontSize: 14.5, fontWeight: 700, color: C.tinta }}>
+          <span style={{ color: C.lav, marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
+          Grupos y categorías
+        </span>
+        <span style={{ fontSize: 12.5, color: C.gris }}>editar todo</span>
+      </button>
+
+      {abierto && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12.5, color: C.gris, marginBottom: 10, lineHeight: 1.5 }}>
+            Renombrar una categoría o grupo actualiza también todos los movimientos e historial. Nada se pierde.
+          </div>
+          {data.grupos.map((g) => (
+            <div key={g.nombre} style={{ ...S.card, padding: "12px 14px" }}>
+              {editGrupo === g.nombre ? (
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  <input style={{ ...S.input, flex: 1, marginBottom: 0 }} value={nuevoNombreGrupo} onChange={(e) => setNuevoNombreGrupo(e.target.value)} autoFocus />
+                  <button style={S.btnSecundario} onClick={() => renombrarGrupo(g.nombre)}>OK</button>
+                  <button style={S.btnMini} onClick={() => setEditGrupo(null)}>cancelar</button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: C.lavOscuro }}>{g.nombre}</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={S.btnMini} onClick={() => { setEditGrupo(g.nombre); setNuevoNombreGrupo(g.nombre); }}>renombrar</button>
+                    <button style={S.btnMini} onClick={() => borrarGrupo(g.nombre)}>borrar</button>
+                  </div>
+                </div>
+              )}
+
+              <div style={S.chips}>
+                {g.categorias.map((cat) => {
+                  const k = `${g.nombre}|${cat}`;
+                  return editCat === k ? (
+                    <span key={k} style={{ display: "flex", gap: 6, alignItems: "center", width: "100%" }}>
+                      <input style={{ ...S.input, flex: 1, marginBottom: 0 }} value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} autoFocus />
+                      <button style={S.btnSecundario} onClick={() => renombrarCategoria(g.nombre, cat)}>OK</button>
+                      <button style={S.btnMini} onClick={() => setEditCat(null)}>cancelar</button>
+                    </span>
+                  ) : (
+                    <span key={k} style={{ ...S.chipBase, background: C.lavSuave, borderColor: "transparent", color: C.tinta, display: "inline-flex", gap: 8, alignItems: "center", cursor: "default" }}>
+                      {cat}
+                      <button style={{ ...S.btnMini, padding: 0 }} onClick={() => { setEditCat(k); setNuevoNombre(cat); }}>✎</button>
+                      {!catEnUso(g.nombre, cat) && (
+                        <button style={{ ...S.btnMini, padding: 0 }} onClick={() => borrarCategoria(g.nombre, cat)}>✕</button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+
+              {agregandoEn === g.nombre ? (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Nueva categoría…" value={nuevaCat} onChange={(e) => setNuevaCat(e.target.value)} autoFocus />
+                  <button style={S.btnSecundario} onClick={() => agregarCategoria(g.nombre)}>Agregar</button>
+                </div>
+              ) : (
+                <button style={S.btnFantasma} onClick={() => { setAgregandoEn(g.nombre); setNuevaCat(""); }}>+ categoría</button>
+              )}
+            </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...S.input, flex: 1, marginBottom: 0 }} placeholder="Nuevo grupo…" value={nuevoGrupo} onChange={(e) => setNuevoGrupo(e.target.value)} />
+            <button style={S.btnSecundario} onClick={agregarGrupo}>Crear grupo</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ————— Deudas —————
+function SeccionDeudas({ data, guardar, avisar }) {
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const [persona, setPersona] = useState("");
+  const [concepto, setConcepto] = useState("");
+  const [monto, setMonto] = useState("");
+  const [moneda, setMoneda] = useState("ARS");
+  const [direccion, setDireccion] = useState("me_deben");
+  const [saldando, setSaldando] = useState(null);
+
+  const crear = () => {
+    const m = parseMonto(monto);
+    if (!persona.trim() || isNaN(m) || m <= 0) return;
+    guardar({
+      ...data,
+      deudas: [{ id: uid(), persona: persona.trim(), concepto: concepto.trim(), monto: m, moneda, direccion, saldada: false, fecha: hoy() }, ...data.deudas],
+    });
+    setPersona(""); setConcepto(""); setMonto(""); setMostrarForm(false);
+    avisar("Deuda anotada");
+  };
+
+  const saldar = (deuda, cuentaId) => {
+    const mov = {
+      id: uid(),
+      tipo: deuda.direccion === "me_deben" ? "ingreso" : "gasto",
+      monto: deuda.monto,
+      cuentaId,
+      fecha: hoy(),
+      grupo: deuda.direccion === "me_deben" ? "Ingresos" : "Personales",
+      categoria: deuda.direccion === "me_deben" ? "Otros ingresos" : "Otros personales",
+      nota: `${deuda.direccion === "me_deben" ? "Cobro a" : "Pago a"} ${deuda.persona}${deuda.concepto ? " — " + deuda.concepto : ""}`,
+    };
+    guardar({
+      ...data,
+      movs: [mov, ...data.movs],
+      deudas: data.deudas.map((d) => (d.id === deuda.id ? { ...d, saldada: true } : d)),
+    });
+    setSaldando(null);
+    avisar("Deuda saldada y movimiento anotado ✓");
+  };
+
+  const activas = data.deudas.filter((d) => !d.saldada);
+  const cuentasCompatibles = (mon) => data.cuentas.filter((c) => c.moneda === mon && c.clase !== "credito");
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={S.fechaHeader}>Deudas</div>
+
+      {activas.length === 0 && !mostrarForm && (
+        <div style={{ fontSize: 13.5, color: C.tintaSuave, marginBottom: 10 }}>Sin deudas pendientes con personas. 🌿</div>
+      )}
+
+      {activas.map((d) => (
+        <div key={d.id} style={S.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: d.direccion === "me_deben" ? C.ingreso : C.gasto }}>
+                {d.direccion === "me_deben" ? "Me debe" : "Le debo"}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.tinta }}>{d.persona}</div>
+              {d.concepto && <div style={{ fontSize: 13, color: C.tintaSuave }}>{d.concepto}</div>}
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.tinta, fontVariantNumeric: "tabular-nums" }}>{fmt(d.monto, d.moneda)}</div>
+          </div>
+          {saldando === d.id ? (
+            <div style={{ marginTop: 10 }}>
+              <label style={{ ...S.label, marginTop: 0 }}>{d.direccion === "me_deben" ? "¿A qué cuenta entra?" : "¿De qué cuenta sale?"}</label>
+              <div style={S.chips}>
+                {cuentasCompatibles(d.moneda).map((c) => (
+                  <Chip key={c.id} dot={colorEntidad(c.entidad)} onClick={() => saldar(d, c.id)}>{etiquetaCuenta(c)}</Chip>
+                ))}
+              </div>
+              <button style={S.btnFantasma} onClick={() => setSaldando(null)}>Cancelar</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button style={{ ...S.btnSecundario, flex: 1 }} onClick={() => setSaldando(d.id)}>Marcar como saldada</button>
+              <button style={S.btnMini} onClick={() => { guardar({ ...data, deudas: data.deudas.filter((x) => x.id !== d.id) }); avisar("Deuda borrada"); }}>
+                borrar
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {mostrarForm ? (
+        <div style={S.card}>
+          <div style={S.chips}>
+            <Chip activo={direccion === "me_deben"} onClick={() => setDireccion("me_deben")}>Me deben</Chip>
+            <Chip activo={direccion === "debo"} onClick={() => setDireccion("debo")}>Debo</Chip>
+          </div>
+          <input style={S.input} placeholder="¿Quién?" value={persona} onChange={(e) => setPersona(e.target.value)} />
+          <input style={S.input} placeholder="¿Por qué? (opcional)" value={concepto} onChange={(e) => setConcepto(e.target.value)} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...S.input, flex: 1 }} inputMode="decimal" placeholder="Monto" value={monto} onChange={(e) => setMonto(e.target.value)} />
+            <div style={{ ...S.chips, marginBottom: 12 }}>
+              <Chip activo={moneda === "ARS"} onClick={() => setMoneda("ARS")}>$</Chip>
+              <Chip activo={moneda === "USD"} onClick={() => setMoneda("USD")}>US$</Chip>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={{ ...S.btnPrimario, flex: 1, marginTop: 0 }} onClick={crear}>Guardar</button>
+            <button style={S.btnSecundario} onClick={() => setMostrarForm(false)}>Cancelar</button>
+          </div>
+        </div>
+      ) : (
+        <button style={{ ...S.btnSecundario, width: "100%" }} onClick={() => setMostrarForm(true)}>+ Anotar deuda</button>
+      )}
+    </div>
+  );
+}
+
+// ————— Poner en cero / borrar —————
+function EmpezarDeNuevo({ data, guardar, avisar }) {
+  const [abierto, setAbierto] = useState(false);
+  const [confirmando, setConfirmando] = useState(null); // "movs" | "saldos" | "todo"
+  const [palabra, setPalabra] = useState("");
+
+  const cantidadMovs = data.movs.length;
+
+  const borrarMovimientos = () => {
+    guardar({ ...data, movs: [], pagosFijos: {}, deudas: [] });
+    setConfirmando(null); setPalabra("");
+    avisar("Movimientos borrados — tu estructura quedó intacta ✓");
+  };
+
+  const ponerSaldosEnCero = () => {
+    guardar({ ...data, cuentas: data.cuentas.map((c) => ({ ...c, inicial: 0 })) });
+    setConfirmando(null); setPalabra("");
+    avisar("Todos los saldos quedaron en cero ✓");
+  };
+
+  const borrarTodo = () => {
+    guardar(datosIniciales());
+    setConfirmando(null); setPalabra("");
+    avisar("Todo reiniciado — arrancás de cero ✓");
+  };
+
+  const acciones = {
+    movs: {
+      titulo: "Borrar todos los movimientos",
+      detalle: `Se borran los ${cantidadMovs} movimientos cargados (gastos, ingresos, transferencias), los pagos de fijos marcados y las deudas con personas. SE CONSERVAN tus cuentas, tarjetas, fijos, categorías, vencimientos y datos de servicios.`,
+      ejecutar: borrarMovimientos,
+    },
+    saldos: {
+      titulo: "Poner todos los saldos en cero",
+      detalle: "El saldo inicial de todas tus cuentas pasa a cero. No se borra ningún movimiento — solo se reinicia el punto de partida de cada cuenta.",
+      ejecutar: ponerSaldosEnCero,
+    },
+    todo: {
+      titulo: "Reiniciar todo",
+      detalle: "Se borra ABSOLUTAMENTE TODO y la app vuelve a como estaba el primer día: cuentas y fijos originales, sin movimientos, sin tus ediciones. No se puede deshacer.",
+      ejecutar: borrarTodo,
+    },
+  };
+
+  const act = confirmando && acciones[confirmando];
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <button style={{ ...S.acordeonHeader, background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 12 }} onClick={() => { setAbierto(!abierto); setConfirmando(null); }}>
+        <span style={{ fontSize: 14.5, fontWeight: 700, color: C.tinta }}>
+          <span style={{ color: C.lav, marginRight: 8, fontSize: 13 }}>{abierto ? "▾" : "▸"}</span>
+          Empezar de nuevo
+        </span>
+        <span style={{ fontSize: 12.5, color: C.gris }}>poner en cero</span>
+      </button>
+
+      {abierto && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12.5, color: C.gris, marginBottom: 10, lineHeight: 1.5 }}>
+            Antes de borrar, descargá una copia de respaldo acá abajo. Con esa copia podés volver atrás si te arrepentís.
+          </div>
+
+          {!confirmando ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button style={{ ...S.btnSecundario, width: "100%", textAlign: "left" }} onClick={() => setConfirmando("movs")}>
+                Borrar todos los movimientos <span style={{ color: C.gris, fontWeight: 500 }}>({cantidadMovs})</span>
+              </button>
+              <button style={{ ...S.btnSecundario, width: "100%", textAlign: "left" }} onClick={() => setConfirmando("saldos")}>
+                Poner todos los saldos en cero
+              </button>
+              <button style={{ ...S.btnSecundario, width: "100%", textAlign: "left", color: C.gasto }} onClick={() => setConfirmando("todo")}>
+                Reiniciar todo desde cero
+              </button>
+            </div>
+          ) : (
+            <div style={{ ...S.card, borderLeft: `4px solid ${C.gasto}` }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.tinta, marginBottom: 6 }}>{act.titulo}</div>
+              <div style={{ fontSize: 13, color: C.tintaSuave, lineHeight: 1.55, marginBottom: 12 }}>{act.detalle}</div>
+              <label style={{ ...S.label, marginTop: 0 }}>Para confirmar, escribí BORRAR</label>
+              <input
+                style={S.input}
+                value={palabra}
+                onChange={(e) => setPalabra(e.target.value)}
+                placeholder="BORRAR"
+                autoFocus
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  style={{ ...S.btnPrimario, flex: 1, marginTop: 0, background: palabra.trim().toUpperCase() === "BORRAR" ? C.gasto : C.linea }}
+                  disabled={palabra.trim().toUpperCase() !== "BORRAR"}
+                  onClick={act.ejecutar}
+                >
+                  Sí, borrar
+                </button>
+                <button style={S.btnSecundario} onClick={() => { setConfirmando(null); setPalabra(""); }}>Cancelar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ————— Respaldo —————
+function Respaldo({ data, guardar, avisar }) {
+  const fileRef = useRef(null);
+
+  const exportar = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `finanzas-respaldo-${hoy()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    avisar("Copia descargada ✓");
+  };
+
+  const importar = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const d = JSON.parse(reader.result);
+        if (!d.cuentas || !d.movs || !d.grupos) throw new Error("formato");
+        guardar(d);
+        avisar("Datos restaurados desde tu copia ✓");
+      } catch {
+        avisar("Ese archivo no parece una copia válida");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  return (
+    <div style={{ marginTop: 26, marginBottom: 10 }}>
+      <div style={S.fechaHeader}>Respaldo</div>
+      <div style={{ fontSize: 12.5, color: C.gris, marginBottom: 8, lineHeight: 1.5 }}>
+        Tus datos se guardan solos en tu cuenta, protegidos por tu contraseña. Con la copia tenés un respaldo extra en tu dispositivo.
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={{ ...S.btnSecundario, flex: 1 }} onClick={exportar}>Descargar copia</button>
+        <button style={{ ...S.btnSecundario, flex: 1 }} onClick={() => fileRef.current && fileRef.current.click()}>Restaurar copia</button>
+        <input ref={fileRef} type="file" accept=".json" style={{ display: "none" }} onChange={importar} />
+      </div>
+    </div>
+  );
+}
+
+// ————— Piezas —————
+function Chip({ activo, onClick, dot, children }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        ...S.chipBase,
+        background: activo ? C.lav : C.carta,
+        color: activo ? "#fff" : C.tinta,
+        borderColor: activo ? C.lav : C.linea,
+        fontWeight: activo ? 700 : 500,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {dot && <span style={{ width: 8, height: 8, borderRadius: 4, background: activo ? "#fff" : dot, display: "inline-block", flexShrink: 0 }} />}
+      {children}
+    </button>
+  );
+}
+
+// ————— Estilos —————
+const S = {
+  app: {
+    minHeight: "100vh",
+    background: C.fondo,
+    fontFamily: "'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif",
+    color: C.tinta,
+  },
+  marco: { maxWidth: 560, margin: "0 auto", padding: "20px 16px 0", position: "relative" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
+  eyebrow: { fontSize: 11.5, letterSpacing: "0.14em", textTransform: "uppercase", color: C.lav, fontWeight: 700 },
+  titulo: { fontSize: 28, fontWeight: 800, margin: "2px 0 0", letterSpacing: "-0.02em", color: C.tinta },
+  badgeError: { fontSize: 11.5, background: C.gastoSuave, color: C.gasto, padding: "4px 10px", borderRadius: 20, fontWeight: 600 },
+  badgeVencido: { fontSize: 10.5, background: C.gasto, color: "#fff", padding: "3px 8px", borderRadius: 12, fontWeight: 800, letterSpacing: "0.05em" },
+  card: {
+    background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 16,
+    padding: "18px 16px", marginBottom: 12, boxShadow: "0 1px 3px rgba(46,42,59,0.05)",
+  },
+  label: { display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.tintaSuave, margin: "10px 0 6px" },
+  input: {
+    width: "100%", boxSizing: "border-box", padding: "11px 12px", fontSize: 15,
+    border: `1.5px solid ${C.linea}`, borderRadius: 10, outline: "none",
+    marginBottom: 12, background: "#FBFAFD", color: C.tinta, fontFamily: "inherit",
+  },
+  inputMonto: {
+    width: "100%", boxSizing: "border-box", padding: "10px 4px", fontSize: 34,
+    fontWeight: 800, border: "none", borderBottom: `2px solid ${C.linea}`,
+    outline: "none", background: "transparent", fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em", marginBottom: 6, fontFamily: "inherit",
+  },
+  chips: { display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 4 },
+  chipBase: {
+    padding: "7px 13px", borderRadius: 20, border: `1.5px solid ${C.linea}`,
+    fontSize: 13.5, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
+  },
+  tipoBtn: {
+    flex: 1, padding: "9px 6px", borderRadius: 10, border: `1.5px solid`,
+    fontSize: 14, cursor: "pointer", fontFamily: "inherit",
+  },
+  btnPrimario: {
+    width: "100%", padding: "13px", background: C.lav, color: "#fff", border: "none",
+    borderRadius: 12, fontSize: 15.5, fontWeight: 700, cursor: "pointer",
+    fontFamily: "inherit", marginTop: 8,
+  },
+  btnVoz: {
+    width: "100%", padding: "12px", border: "none", borderRadius: 12,
+    fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+    marginBottom: 12, transition: "all 0.15s",
+  },
+  btnSecundario: {
+    padding: "11px 16px", background: C.carta, color: C.lavOscuro,
+    border: `1.5px solid ${C.linea}`, borderRadius: 12, fontSize: 14,
+    fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+  },
+  btnFantasma: {
+    background: "none", border: "none", color: C.lav, fontSize: 13.5,
+    fontWeight: 600, cursor: "pointer", padding: "8px 0 0", fontFamily: "inherit",
+  },
+  btnMini: {
+    background: "none", border: "none", color: C.gris, fontSize: 12,
+    cursor: "pointer", padding: "2px 4px", fontFamily: "inherit",
+  },
+  acordeonHeader: {
+    width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+    padding: "13px 16px", background: "none", border: "none", cursor: "pointer",
+    fontFamily: "inherit", textAlign: "left", gap: 10,
+  },
+  nav: {
+    position: "sticky", bottom: 0, display: "flex", background: C.carta,
+    borderTop: `1px solid ${C.linea}`, margin: "0 -16px",
+    boxShadow: "0 -2px 10px rgba(46,42,59,0.06)",
+  },
+  navBtn: {
+    flex: 1, padding: "13px 2px 15px", background: "none", border: "none",
+    fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
+  },
+  toast: {
+    position: "fixed", bottom: 78, left: "50%", transform: "translateX(-50%)",
+    background: C.lavOscuro, color: "#fff", padding: "10px 18px", borderRadius: 24,
+    fontSize: 13.5, fontWeight: 600, boxShadow: "0 4px 16px rgba(46,42,59,0.3)",
+    zIndex: 50, whiteSpace: "nowrap",
+  },
+  movFila: {
+    display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12,
+    background: C.carta, border: `1px solid ${C.linea}`, borderRadius: 12,
+    padding: "11px 14px", marginBottom: 8,
+  },
+  fechaHeader: {
+    fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+    color: C.tintaSuave, margin: "0 0 8px 2px",
+  },
+  vacio: {
+    textAlign: "center", color: C.tintaSuave, fontSize: 14.5,
+    padding: "40px 20px", lineHeight: 1.6,
+  },
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+</script>
+</body>
+</html>
