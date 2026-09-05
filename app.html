@@ -284,6 +284,80 @@ const detectarTipo = (texto) => {
   return "gasto";
 };
 
+// ————— Ciclo real de una tarjeta —————
+// El vencimiento SIEMPRE cae después del cierre. Si el día de vencimiento es
+// menor que el de cierre (ej: cierra 20, vence 3), el vencimiento es del mes siguiente.
+const fechaConDia = (anio, mes, dia) => {
+  const ultimo = new Date(anio, mes + 1, 0).getDate();
+  return new Date(anio, mes, Math.min(dia, ultimo));
+};
+
+const cicloTarjeta = (tarjeta) => {
+  if (!tarjeta.cierreDia) return null;
+  const ahora = new Date();
+  const hoyD = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+
+  // Próximo cierre: este mes si todavía no pasó, si no el que viene
+  let cierre = fechaConDia(ahora.getFullYear(), ahora.getMonth(), tarjeta.cierreDia);
+  if (cierre < hoyD) cierre = fechaConDia(ahora.getFullYear(), ahora.getMonth() + 1, tarjeta.cierreDia);
+
+  // Cierre anterior
+  const cierreAnterior = fechaConDia(cierre.getFullYear(), cierre.getMonth() - 1, tarjeta.cierreDia);
+
+  const vencDe = (fCierre) => {
+    if (!tarjeta.venceDia) return null;
+    const mismoMes = tarjeta.venceDia > tarjeta.cierreDia;
+    return fechaConDia(fCierre.getFullYear(), fCierre.getMonth() + (mismoMes ? 0 : 1), tarjeta.venceDia);
+  };
+
+  const diffDias = (f) => Math.round((f - hoyD) / 86400000);
+
+  return {
+    cierre,
+    vencimiento: vencDe(cierre),
+    vencimientoAnterior: vencDe(cierreAnterior),
+    diasACierre: diffDias(cierre),
+    diasAVencimiento: vencDe(cierre) ? diffDias(vencDe(cierre)) : null,
+  };
+};
+
+const fmtFechaLarga = (f) => (f ? `${f.getDate()} de ${MESES[f.getMonth()].toLowerCase()}` : "—");
+
+// ¿Está vencida? Solo lo afirmamos cuando tenemos certeza: pasó el vencimiento
+// del ciclo anterior, hay deuda, HAY consumos de ese ciclo, y no hay ningún
+// pago registrado ni marca manual de "ya la pagué". Ante la duda, no avisamos:
+// un cartel de VENCIDO equivocado es peor que no avisar.
+const tarjetaVencida = (tarjeta, data, deuda) => {
+  const c = cicloTarjeta(tarjeta);
+  if (!c || !c.vencimientoAnterior) return false;
+  const hayDeuda = deuda && (deuda.ARS > 0 || deuda.USD > 0);
+  if (!hayDeuda) return false;
+
+  const ahora = new Date();
+  const hoyD = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+  if (hoyD <= c.vencimientoAnterior) return false;
+
+  const iso = (f) => `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+  const cierreAnterior = fechaConDia(c.cierre.getFullYear(), c.cierre.getMonth() - 1, tarjeta.cierreDia);
+  const cierreDosAtras = fechaConDia(c.cierre.getFullYear(), c.cierre.getMonth() - 2, tarjeta.cierreDia);
+
+  // Si marcó "ya la pagué" después del cierre anterior, está al día
+  if (tarjeta.pagadaHasta && tarjeta.pagadaHasta >= iso(cierreDosAtras)) return false;
+
+  // Si registró algún pago desde el cierre de dos ciclos atrás, está al día
+  const hayPago = data.movs.some(
+    (m) => m.tipo === "transfer" && m.cuentaDestinoId === tarjeta.id && m.fecha >= iso(cierreDosAtras)
+  );
+  if (hayPago) return false;
+
+  // Solo avisamos si hay consumos cargados de ESE ciclo (si no, no sabemos nada)
+  const consumosDelCiclo = data.movs.some(
+    (m) => m.tipo === "gasto" && m.cuentaId === tarjeta.id &&
+           m.fecha >= iso(cierreDosAtras) && m.fecha < iso(cierreAnterior)
+  );
+  return consumosDelCiclo;
+};
+
 // ————— Raíz: config → sesión → app —————
 function Root() {
   const [session, setSession] = useState(null);
@@ -610,12 +684,7 @@ function Vencidos({ data, deudasTarjetas }) {
   };
 
   const tarjetasVencidas = data.cuentas.filter(
-    (c) =>
-      c.clase === "credito" &&
-      c.venceDia &&
-      tieneDeuda(c.id) &&
-      diaHoy() > c.venceDia &&
-      !data.movs.some((m) => m.tipo === "transfer" && m.cuentaDestinoId === c.id && m.fecha.slice(0, 7) === mes)
+    (c) => c.clase === "credito" && tarjetaVencida(c, data, deudasTarjetas[c.id])
   );
 
   const proximos = data.fijos.filter(
@@ -641,11 +710,14 @@ function Vencidos({ data, deudasTarjetas }) {
               <b>{f.categoria}</b> <span style={{ color: C.gris }}>— venció el {f.venceDia}</span>
             </div>
           ))}
-          {tarjetasVencidas.map((c) => (
-            <div key={c.id} style={{ fontSize: 13.5, color: C.tinta, marginBottom: 3 }}>
-              <b>{etiquetaCuenta(c)}</b> <span style={{ color: C.gris }}>— venció el {c.venceDia} · debés {deudaTexto(c.id)}</span>
-            </div>
-          ))}
+          {tarjetasVencidas.map((c) => {
+            const ci = cicloTarjeta(c);
+            return (
+              <div key={c.id} style={{ fontSize: 13.5, color: C.tinta, marginBottom: 3 }}>
+                <b>{etiquetaCuenta(c)}</b> <span style={{ color: C.gris }}>— venció el {fmtFechaLarga(ci && ci.vencimientoAnterior)} · debés {deudaTexto(c.id)}</span>
+              </div>
+            );
+          })}
         </div>
       )}
       {proximos.length > 0 && (
@@ -1752,7 +1824,8 @@ function Tarjetas({ data, deudasTarjetas, guardar, avisar }) {
         const consumos = consumosDelMes(t.id);
         const pagos = pagosDelMes(t.id);
         const planes = planesDeCuotas(t.id);
-        const vencida = t.venceDia && conDeuda && diaHoy() > t.venceDia && pagos.length === 0 && mes === mesActual();
+        const vencida = tarjetaVencida(t, data, d) && mes === mesActual();
+        const ciclo = cicloTarjeta(t);
         const abierto = abierta === t.id;
 
         return (
@@ -1775,8 +1848,8 @@ function Tarjetas({ data, deudasTarjetas, guardar, avisar }) {
             </div>
 
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.linea}` }}>
-              <MiniDato titulo="Cierra" valor={t.cierreDia ? `${fechaDelDia(t.cierreDia)} · ${diasHastaDia(t.cierreDia) === 0 ? "hoy" : "en " + diasHastaDia(t.cierreDia) + "d"}` : "sin cargar"} />
-              <MiniDato titulo="Vence" valor={t.venceDia ? `${fechaDelDia(t.venceDia)}${vencida ? "" : " · en " + diasHastaDia(t.venceDia) + "d"}` : "sin cargar"} color={vencida ? C.gasto : undefined} />
+              <MiniDato titulo="Cierra" valor={ciclo ? `${fmtFechaLarga(ciclo.cierre)} · ${ciclo.diasACierre === 0 ? "hoy" : "en " + ciclo.diasACierre + "d"}` : "sin cargar"} />
+              <MiniDato titulo="Vence" valor={ciclo && ciclo.vencimiento ? `${fmtFechaLarga(ciclo.vencimiento)} · ${ciclo.diasAVencimiento === 0 ? "hoy" : "en " + ciclo.diasAVencimiento + "d"}` : "sin cargar"} color={vencida ? C.gasto : undefined} />
               <MiniDato titulo={`Consumos ${nombreMes(mes).split(" ")[0].toLowerCase()}`} valor={fmtMonedas(sumaPorMoneda(consumos))} color={consumos.length ? C.gasto : undefined} />
               <MiniDato
                 titulo="Pagos del mes"
@@ -2002,7 +2075,8 @@ function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
               const d = deudasTarjetas[c.id] || { ARS: 0, USD: 0 };
               const conDeuda = esTarjeta && (d.ARS > 0 || d.USD > 0);
               const pagada = esTarjeta && pagadaEsteMes(c.id);
-              const vencida = esTarjeta && c.venceDia && conDeuda && diaHoy() > c.venceDia && !pagada;
+              const vencida = esTarjeta && tarjetaVencida(c, data, d);
+              const ciclo = esTarjeta ? cicloTarjeta(c) : null;
               return (
                 <div key={c.id} style={{ ...S.movFila, flexDirection: "column", alignItems: "stretch", gap: 0, borderLeft: `4px solid ${col}` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2038,16 +2112,16 @@ function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
 
                   {esTarjeta && (
                     <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${C.linea}` }}>
-                      {c.cierreDia && (
+                      {ciclo && (
                         <MiniDato
                           titulo="Cierra"
-                          valor={`${fechaDelDia(c.cierreDia)} · ${diasHastaDia(c.cierreDia) === 0 ? "hoy" : "en " + diasHastaDia(c.cierreDia) + " días"}`}
+                          valor={`${fmtFechaLarga(ciclo.cierre)} · ${ciclo.diasACierre === 0 ? "hoy" : "en " + ciclo.diasACierre + " días"}`}
                         />
                       )}
-                      {c.venceDia && (
+                      {ciclo && ciclo.vencimiento && (
                         <MiniDato
                           titulo="Vence"
-                          valor={`${fechaDelDia(c.venceDia)}${vencida ? "" : " · " + (diasHastaDia(c.venceDia) === 0 ? "hoy" : "en " + diasHastaDia(c.venceDia) + " días")}`}
+                          valor={`${fmtFechaLarga(ciclo.vencimiento)} · ${ciclo.diasAVencimiento === 0 ? "hoy" : "en " + ciclo.diasAVencimiento + " días"}`}
                           color={vencida ? C.gasto : undefined}
                         />
                       )}
@@ -2061,6 +2135,17 @@ function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
                         valor={!conDeuda ? "—" : [d.ARS > 0 && fmt(d.ARS, "ARS"), d.USD > 0 && fmt(d.USD, "USD")].filter(Boolean).join(" + ")}
                         color={conDeuda ? C.gasto : undefined}
                       />
+                      {conDeuda && (
+                        <button
+                          style={{ ...S.btnMini, color: C.lav, fontWeight: 700, alignSelf: "flex-end" }}
+                          onClick={() => {
+                            guardar({ ...data, cuentas: data.cuentas.map((x) => (x.id === c.id ? { ...x, pagadaHasta: hoy() } : x)) });
+                            avisar("Marcada como al día ✓");
+                          }}
+                        >
+                          {vencida ? "Ya la pagué" : "Marcar al día"}
+                        </button>
+                      )}
                     </div>
                   )}
 
