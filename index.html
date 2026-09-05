@@ -142,6 +142,14 @@ const diasHastaDia = (dia) => {
   const diasDelMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate();
   return diasDelMes - hoyD + dia;
 };
+// Fecha concreta de este mes (o del que viene si ya pasó), ej: "22 de septiembre"
+const fechaDelDia = (dia) => {
+  const ahora = new Date();
+  const pasó = dia < diaHoy();
+  const base = new Date(ahora.getFullYear(), ahora.getMonth() + (pasó ? 1 : 0), 1);
+  const ultimo = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+  return `${Math.min(dia, ultimo)} de ${MESES[base.getMonth()].toLowerCase()}`;
+};
 const parseMonto = (s) => {
   if (!s) return NaN;
   let t = String(s).trim().replace(/\s/g, "");
@@ -665,6 +673,7 @@ function CargaRapida({ data, guardar, avisar }) {
   const [monedaTarjeta, setMonedaTarjeta] = useState("");
   const [cuotas, setCuotas] = useState(1);
   const [cuotasOtro, setCuotasOtro] = useState("");
+  const [cuotasYaPagas, setCuotasYaPagas] = useState("");
   const [escuchando, setEscuchando] = useState(false);
   const [dictado, setDictado] = useState("");
   const [errorVoz, setErrorVoz] = useState("");
@@ -756,7 +765,10 @@ function CargaRapida({ data, guardar, avisar }) {
     const nuevosMovs = [];
 
     if (tipo === "gasto" && esTarjeta && nCuotas > 1) {
-      // Compra en cuotas: un movimiento por mes, cada uno por monto/cuotas
+      // Compra en cuotas: un movimiento por mes, cada uno por monto/cuotas.
+      // Si ya pagaste algunas, la primera cuota se ubica hacia atrás para que
+      // el historial y el acumulado queden fieles a la realidad.
+      const yaPagas = Math.max(0, Math.min(parseInt(cuotasYaPagas, 10) || 0, nCuotas - 1));
       const porCuota = Math.round((m / nCuotas) * 100) / 100;
       let acumulado = 0;
       for (let i = 1; i <= nCuotas; i++) {
@@ -767,7 +779,7 @@ function CargaRapida({ data, guardar, avisar }) {
           tipo: "gasto",
           monto: montoCuota,
           cuentaId,
-          fecha: sumarMeses(fecha, i - 1),
+          fecha: sumarMeses(fecha, i - 1 - yaPagas),
           nota: `${nota.trim() ? nota.trim() + " " : ""}(cuota ${i}/${nCuotas})`,
           grupo,
           categoria,
@@ -887,9 +899,27 @@ function CargaRapida({ data, guardar, avisar }) {
               onChange={(e) => setCuotasOtro(e.target.value)}
             />
           )}
+          {nCuotas > 1 && (
+            <React.Fragment>
+              <label style={S.label}>¿Ya venís pagando cuotas de antes? (opcional)</label>
+              <input
+                style={S.input}
+                inputMode="numeric"
+                placeholder="¿Cuántas cuotas ya pagaste? Dejá vacío si arranca ahora"
+                value={cuotasYaPagas}
+                onChange={(e) => setCuotasYaPagas(e.target.value)}
+              />
+            </React.Fragment>
+          )}
           {nCuotas > 1 && parseMonto(monto) > 0 && (
-            <div style={{ fontSize: 12.5, color: C.tintaSuave, marginTop: 2 }}>
-              El total se divide: {fmt(Math.round((parseMonto(monto) / nCuotas) * 100) / 100, monedaGasto)} por mes durante {nCuotas} meses, empezando este mes.
+            <div style={{ fontSize: 12.5, color: C.tintaSuave, marginTop: 2, lineHeight: 1.5 }}>
+              {(() => {
+                const ya = Math.max(0, Math.min(parseInt(cuotasYaPagas, 10) || 0, nCuotas - 1));
+                const cuota = fmt(Math.round((parseMonto(monto) / nCuotas) * 100) / 100, monedaGasto);
+                return ya > 0
+                  ? `${cuota} por mes. Registro las ${ya} cuotas ya pagadas en los meses anteriores y las ${nCuotas - ya} que faltan desde este mes.`
+                  : `El total se divide: ${cuota} por mes durante ${nCuotas} meses, empezando este mes.`;
+              })()}
             </div>
           )}
         </React.Fragment>
@@ -1691,10 +1721,17 @@ function Cuentas({ data, balances, deudasTarjetas, guardar, avisar }) {
                   {esTarjeta && (
                     <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${C.linea}` }}>
                       {c.cierreDia && (
-                        <MiniDato titulo="Cierra" valor={diasHastaDia(c.cierreDia) === 0 ? "¡Hoy!" : `en ${diasHastaDia(c.cierreDia)} días (el ${c.cierreDia})`} />
+                        <MiniDato
+                          titulo="Cierra"
+                          valor={`${fechaDelDia(c.cierreDia)} · ${diasHastaDia(c.cierreDia) === 0 ? "hoy" : "en " + diasHastaDia(c.cierreDia) + " días"}`}
+                        />
                       )}
                       {c.venceDia && (
-                        <MiniDato titulo="Vence" valor={`el ${c.venceDia}`} color={vencida ? C.gasto : undefined} />
+                        <MiniDato
+                          titulo="Vence"
+                          valor={`${fechaDelDia(c.venceDia)}${vencida ? "" : " · " + (diasHastaDia(c.venceDia) === 0 ? "hoy" : "en " + diasHastaDia(c.venceDia) + " días")}`}
+                          color={vencida ? C.gasto : undefined}
+                        />
                       )}
                       <MiniDato
                         titulo="Este mes"
