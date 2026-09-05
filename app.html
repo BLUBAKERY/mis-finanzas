@@ -1437,6 +1437,8 @@ function Resumen({ data }) {
         </div>
       </div>
 
+      <RankingCategorias gastos={gastos} cuentas={data.cuentas} />
+
       <div style={S.fechaHeader}>Gastos por grupo — tocá para abrir</div>
 
       {gruposDelMes.length === 0 && <div style={S.vacio}>Sin gastos anotados en {nombreMes(mes).toLowerCase()}.</div>}
@@ -1528,6 +1530,77 @@ function Resumen({ data }) {
           })}
         </React.Fragment>
       )}
+    </div>
+  );
+}
+
+// ————— Ranking: en qué se te fue la plata —————
+function RankingCategorias({ gastos, cuentas }) {
+  const [moneda, setMoneda] = useState("ARS");
+  const [verTodo, setVerTodo] = useState(false);
+
+  const delaMoneda = gastos.filter((m) => monedaDelMov(m, cuentas) === moneda);
+  const hayUSD = gastos.some((m) => monedaDelMov(m, cuentas) === "USD");
+
+  const porCat = {};
+  delaMoneda.forEach((m) => {
+    const k = m.categoria || "Sin categoría";
+    if (!porCat[k]) porCat[k] = { total: 0, veces: 0, grupo: m.grupo || "" };
+    porCat[k].total += m.monto;
+    porCat[k].veces += 1;
+  });
+
+  const lista = Object.entries(porCat).sort((a, b) => b[1].total - a[1].total);
+  const total = lista.reduce((s, [, v]) => s + v.total, 0);
+  const visibles = verTodo ? lista : lista.slice(0, 8);
+
+  if (lista.length === 0) return null;
+
+  return (
+    <div style={{ ...S.card }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: C.tinta }}>¿En qué se te fue la plata?</div>
+        {hayUSD && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <Chip activo={moneda === "ARS"} onClick={() => setMoneda("ARS")}>$</Chip>
+            <Chip activo={moneda === "USD"} onClick={() => setMoneda("USD")}>US$</Chip>
+          </div>
+        )}
+      </div>
+
+      {visibles.map(([cat, v]) => {
+        const pct = total > 0 ? (v.total / total) * 100 : 0;
+        return (
+          <div key={cat} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 3 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: C.tinta, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {cat}
+                <span style={{ color: C.gris, fontWeight: 500, fontSize: 12, marginLeft: 6 }}>
+                  {v.grupo ? v.grupo : ""}{v.veces > 1 ? ` · ${v.veces}x` : ""}
+                </span>
+              </span>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: C.tinta, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                {fmt(v.total, moneda)}
+                <span style={{ color: C.gris, fontWeight: 500, fontSize: 12, marginLeft: 5 }}>{pct.toFixed(0)}%</span>
+              </span>
+            </div>
+            <div style={{ height: 6, background: C.lavSuave, borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ width: `${Math.max(pct, 1.5)}%`, height: "100%", background: C.lav, borderRadius: 3 }} />
+            </div>
+          </div>
+        );
+      })}
+
+      {lista.length > 8 && (
+        <button style={{ ...S.btnFantasma, width: "100%", textAlign: "center" }} onClick={() => setVerTodo(!verTodo)}>
+          {verTodo ? "Ver solo las 8 más grandes" : `Ver las ${lista.length - 8} restantes`}
+        </button>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.linea}`, fontSize: 13 }}>
+        <span style={{ color: C.tintaSuave, fontWeight: 600 }}>Total del mes</span>
+        <span style={{ fontWeight: 800, color: C.gasto, fontVariantNumeric: "tabular-nums" }}>{fmt(total, moneda)}</span>
+      </div>
     </div>
   );
 }
