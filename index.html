@@ -194,6 +194,83 @@ const calcularDeudasTarjetas = (data) => {
   return t;
 };
 
+// ————— Interpretar frases dictadas por voz —————
+const NUM_PALABRAS = {
+  cero: 0, un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+  diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17,
+  dieciocho: 18, diecinueve: 19, veinte: 20, veintiuno: 21, veinticinco: 25, treinta: 30, cuarenta: 40,
+  cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100,
+  doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600,
+  setecientos: 700, ochocientos: 800, novecientos: 900,
+};
+
+const sinAcentos = (s) =>
+  String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+// Saca el monto de la frase: acepta "4000", "4.000", "4 mil", "cuatro mil", "cuatro mil quinientos"
+const extraerMonto = (texto) => {
+  const t = sinAcentos(texto);
+
+  // 1) Número escrito con dígitos, con o sin "mil" detrás
+  const conDigitos = t.match(/(\d+(?:[.,]\d+)?)\s*(mil|lucas|palos)?/);
+  if (conDigitos) {
+    let n = parseFloat(conDigitos[1].replace(/\./g, "").replace(",", "."));
+    if (conDigitos[2] === "mil" || conDigitos[2] === "lucas") n *= 1000;
+    if (conDigitos[2] === "palos") n *= 1000000;
+    if (!isNaN(n) && n > 0) return n;
+  }
+
+  // 2) Número en palabras
+  const palabras = t.split(/\s+/);
+  let total = 0, actual = 0, encontro = false;
+  for (const p of palabras) {
+    if (p in NUM_PALABRAS) { actual += NUM_PALABRAS[p]; encontro = true; }
+    else if (p === "mil") { actual = (actual || 1) * 1000; total += actual; actual = 0; encontro = true; }
+    else if (p === "millon" || p === "millones") { actual = (actual || 1) * 1000000; total += actual; actual = 0; encontro = true; }
+    else if (p === "y") { /* seguir acumulando: "cuarenta y cinco" */ }
+    else if (encontro && actual + total > 0) break;
+  }
+  const n = total + actual;
+  return encontro && n > 0 ? n : NaN;
+};
+
+// Busca a qué cuenta se refiere la frase
+const detectarCuenta = (texto, cuentas) => {
+  const t = sinAcentos(texto);
+  let mejor = null, mejorPuntaje = 0;
+  cuentas.forEach((c) => {
+    const candidatos = [c.entidad, c.nombre, `${c.entidad} ${c.nombre}`];
+    candidatos.forEach((cand) => {
+      const palabras = sinAcentos(cand).split(/\s+/).filter((w) => w.length > 3);
+      const aciertos = palabras.filter((w) => t.includes(w)).length;
+      if (aciertos > mejorPuntaje) { mejorPuntaje = aciertos; mejor = c; }
+    });
+  });
+  return mejor;
+};
+
+// Busca grupo + categoría mencionados
+const detectarCategoria = (texto, grupos) => {
+  const t = sinAcentos(texto);
+  let mejor = null, mejorLargo = 0;
+  grupos.forEach((g) => {
+    g.categorias.forEach((cat) => {
+      const limpia = sinAcentos(cat).replace(/[^a-z0-9\s]/g, " ");
+      limpia.split(/\s+/).filter((w) => w.length > 3).forEach((w) => {
+        if (t.includes(w) && w.length > mejorLargo) { mejorLargo = w.length; mejor = { grupo: g.nombre, categoria: cat }; }
+      });
+    });
+  });
+  return mejor;
+};
+
+const detectarTipo = (texto) => {
+  const t = sinAcentos(texto);
+  if (/\b(cobre|cobra|ingreso|ingrese|entro|entraron|me pagaron|vendi|recibi|gane)\b/.test(t)) return "ingreso";
+  if (/\b(transferi|pase|cambie|moví|movi)\b/.test(t)) return "transfer";
+  return "gasto";
+};
+
 // ————— Raíz: config → sesión → app —————
 function Root() {
   const [session, setSession] = useState(null);
@@ -588,6 +665,66 @@ function CargaRapida({ data, guardar, avisar }) {
   const [monedaTarjeta, setMonedaTarjeta] = useState("");
   const [cuotas, setCuotas] = useState(1);
   const [cuotasOtro, setCuotasOtro] = useState("");
+  const [escuchando, setEscuchando] = useState(false);
+  const [dictado, setDictado] = useState("");
+  const [errorVoz, setErrorVoz] = useState("");
+  const recRef = useRef(null);
+
+  const hayVoz = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const aplicarDictado = (frase) => {
+    setDictado(frase);
+    const t = detectarTipo(frase);
+    setTipo(t);
+
+    const m = extraerMonto(frase);
+    if (!isNaN(m)) setMonto(String(m));
+
+    const c = detectarCuenta(frase, data.cuentas);
+    if (c) setCuentaId(c.id);
+
+    if (t === "gasto") {
+      const cat = detectarCategoria(frase, data.grupos.filter((g) => g.nombre !== "Ingresos"));
+      if (cat) { setGrupo(cat.grupo); setCategoria(cat.categoria); }
+    } else if (t === "ingreso") {
+      const cat = detectarCategoria(frase, data.grupos.filter((g) => g.nombre === "Ingresos"));
+      if (cat) setCategoria(cat.categoria);
+    }
+
+    setNota(frase);
+    setMasOpciones(true);
+    setFecha(hoy());
+  };
+
+  const escuchar = () => {
+    setErrorVoz("");
+    if (!hayVoz) {
+      setErrorVoz("Tu navegador no permite dictado. Probá con Chrome, o usá el micrófono del teclado escribiendo en la nota.");
+      return;
+    }
+    if (escuchando && recRef.current) { recRef.current.stop(); return; }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = "es-AR";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (ev) => {
+      const frase = ev.results[0][0].transcript;
+      aplicarDictado(frase);
+    };
+    rec.onerror = (ev) => {
+      setErrorVoz(
+        ev.error === "not-allowed" ? "Necesito permiso para usar el micrófono. Habilitalo en el candado de la barra de direcciones."
+        : ev.error === "no-speech" ? "No te escuché. Probá de nuevo."
+        : "No se pudo escuchar: " + ev.error
+      );
+      setEscuchando(false);
+    };
+    rec.onend = () => setEscuchando(false);
+    try { rec.start(); setEscuchando(true); } catch (e) { setErrorVoz("No se pudo abrir el micrófono."); }
+  };
 
   const cta = data.cuentas.find((c) => c.id === cuentaId);
   const ctaDestino = data.cuentas.find((c) => c.id === cuentaDestinoId);
@@ -669,6 +806,25 @@ function CargaRapida({ data, guardar, avisar }) {
 
   return (
     <div style={{ ...S.card, borderTop: `3px solid ${colorTipo}` }}>
+      <button
+        style={{
+          ...S.btnVoz,
+          background: escuchando ? C.gasto : C.lavSuave,
+          color: escuchando ? "#fff" : C.lavOscuro,
+        }}
+        onClick={escuchar}
+      >
+        {escuchando ? "🎙 Escuchando… tocá para parar" : "🎙 Dictar el movimiento"}
+      </button>
+
+      {dictado && (
+        <div style={{ fontSize: 12.5, color: C.tintaSuave, background: C.lavSuave, padding: "8px 10px", borderRadius: 8, marginBottom: 10, lineHeight: 1.45 }}>
+          Escuché: <i>"{dictado}"</i><br />
+          <span style={{ color: C.gris }}>Revisá lo que completé abajo y tocá Anotar.</span>
+        </div>
+      )}
+      {errorVoz && <div style={{ fontSize: 12.5, color: C.gasto, marginBottom: 10, lineHeight: 1.45 }}>{errorVoz}</div>}
+
       <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
         {[["gasto", "Gasto"], ["ingreso", "Ingreso"], ["transfer", "Entre cajas"]].map(([k, label]) => (
           <button
@@ -2298,6 +2454,11 @@ const S = {
     width: "100%", padding: "13px", background: C.lav, color: "#fff", border: "none",
     borderRadius: 12, fontSize: 15.5, fontWeight: 700, cursor: "pointer",
     fontFamily: "inherit", marginTop: 8,
+  },
+  btnVoz: {
+    width: "100%", padding: "12px", border: "none", borderRadius: 12,
+    fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+    marginBottom: 12, transition: "all 0.15s",
   },
   btnSecundario: {
     padding: "11px 16px", background: C.carta, color: C.lavOscuro,
