@@ -486,10 +486,26 @@ function MisFinanzas({ session }) {
   const [errorStorage, setErrorStorage] = useState(false);
   const [tab, setTab] = useState("inicio");
   const [aviso, setAviso] = useState("");
+  const [ofreceRestaurar, setOfreceRestaurar] = useState(null);
+
+  // Clave de la copia local de seguridad, propia de cada usuario
+  const CLAVE_LOCAL = `finanzas-copia-${session.user.id}`;
+
+  const leerCopiaLocal = () => {
+    try {
+      const t = window.localStorage.getItem(CLAVE_LOCAL);
+      return t ? JSON.parse(t) : null;
+    } catch (e) { return null; }
+  };
+
+  const guardarCopiaLocal = (d) => {
+    try { window.localStorage.setItem(CLAVE_LOCAL, JSON.stringify(d)); } catch (e) { /* sin espacio */ }
+  };
 
   const cargarDatos = async () => {
     setCargando(true);
     setErrorCarga(false);
+    const local = leerCopiaLocal();
     try {
       const { data: fila, error } = await sb
         .from("finanzas")
@@ -497,29 +513,60 @@ function MisFinanzas({ session }) {
         .eq("user_id", session.user.id)
         .maybeSingle();
       if (error) throw error;
-      // Solo usamos datos iniciales si la consulta FUNCIONÓ y confirmó que no hay nada guardado.
-      // Si la consulta falla, NUNCA pisamos tus datos: mostramos error y reintentás.
-      setData(fila && fila.data ? fila.data : datosIniciales());
+
+      const enNube = fila && fila.data ? fila.data : null;
+
+      // Si la nube está vacía pero hay copia en este dispositivo, ofrecemos restaurarla
+      if (!enNube && local && local.movs && local.movs.length > 0) {
+        setOfreceRestaurar(local);
+        setData(local);
+        setCargando(false);
+        return;
+      }
+      // Si la copia local tiene MÁS movimientos que la nube, avisamos
+      if (enNube && local && local.movs && enNube.movs && local.movs.length > enNube.movs.length) {
+        setOfreceRestaurar(local);
+        setData(enNube);
+        setCargando(false);
+        return;
+      }
+
+      setData(enNube || local || datosIniciales());
     } catch (e) {
-      setErrorCarga(true);
+      if (local) { setData(local); } else { setErrorCarga(true); }
     }
     setCargando(false);
   };
 
   useEffect(() => { cargarDatos(); }, [session.user.id]);
 
+  // Guardar: primero la copia local (instantánea y segura), después la nube,
+  // con reintentos y verificación real de que quedó escrito.
   const guardar = async (nuevo) => {
     setData(nuevo);
-    try {
-      const { error } = await sb.from("finanzas").upsert({
-        user_id: session.user.id,
-        data: nuevo,
-        updated_at: new Date().toISOString(),
-      });
-      if (error) throw error;
-      setErrorStorage(false);
-    } catch (e) {
-      setErrorStorage(true);
+    guardarCopiaLocal(nuevo);
+    setErrorStorage(false);
+
+    for (let intento = 1; intento <= 3; intento++) {
+      try {
+        const { error } = await sb.from("finanzas").upsert({
+          user_id: session.user.id,
+          data: nuevo,
+          updated_at: new Date().toISOString(),
+        });
+        if (error) throw error;
+
+        // Verificación: releemos para confirmar que de verdad quedó guardado
+        const { data: check, error: e2 } = await sb
+          .from("finanzas").select("updated_at").eq("user_id", session.user.id).maybeSingle();
+        if (e2 || !check) throw new Error("no se pudo verificar");
+
+        setErrorStorage(false);
+        return true;
+      } catch (e) {
+        if (intento === 3) { setErrorStorage(true); return false; }
+        await new Promise((r) => setTimeout(r, 800 * intento));
+      }
     }
   };
 
@@ -568,6 +615,33 @@ function MisFinanzas({ session }) {
 
   return (
     <div style={S.app}>
+      {errorStorage && (
+        <div style={S.barraAlerta}>
+          ⚠️ NO SE ESTÁ GUARDANDO EN LA NUBE — hay una copia en este dispositivo.
+          <button
+            style={{ ...S.btnAlerta }}
+            onClick={async () => { const ok = await guardar(data); if (ok) avisar("Guardado ✓"); }}
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+
+      {ofreceRestaurar && (
+        <div style={S.barraAviso}>
+          Encontré una copia en este dispositivo con {ofreceRestaurar.movs.length} movimientos que no está en la nube.
+          <button
+            style={S.btnAlerta}
+            onClick={async () => { await guardar(ofreceRestaurar); setOfreceRestaurar(null); avisar("Datos restaurados ✓"); }}
+          >
+            Restaurar
+          </button>
+          <button style={{ ...S.btnAlerta, background: "transparent", border: "1px solid rgba(255,255,255,0.5)" }} onClick={() => setOfreceRestaurar(null)}>
+            Ignorar
+          </button>
+        </div>
+      )}
+
       <div style={S.marco}>
         <header style={S.header}>
           <div>
@@ -575,7 +649,6 @@ function MisFinanzas({ session }) {
             <h1 style={S.titulo}>{titulos[tab]}</h1>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            {errorStorage && <div style={S.badgeError}>Sin guardar — revisá conexión</div>}
             <button style={S.btnMini} onClick={salir}>cerrar sesión</button>
           </div>
         </header>
@@ -2936,6 +3009,22 @@ const S = {
   header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
   eyebrow: { fontSize: 11.5, letterSpacing: "0.14em", textTransform: "uppercase", color: C.lav, fontWeight: 700 },
   titulo: { fontSize: 28, fontWeight: 800, margin: "2px 0 0", letterSpacing: "-0.02em", color: C.tinta },
+  barraAlerta: {
+    position: "sticky", top: 0, zIndex: 100, background: "#A83232", color: "#fff",
+    padding: "12px 14px", fontSize: 13.5, fontWeight: 700, display: "flex",
+    alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap",
+    textAlign: "center", lineHeight: 1.4,
+  },
+  barraAviso: {
+    position: "sticky", top: 0, zIndex: 99, background: C.lavOscuro, color: "#fff",
+    padding: "12px 14px", fontSize: 13, fontWeight: 600, display: "flex",
+    alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap",
+    textAlign: "center", lineHeight: 1.4,
+  },
+  btnAlerta: {
+    background: "#fff", color: "#A83232", border: "none", borderRadius: 8,
+    padding: "6px 14px", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit",
+  },
   badgeError: { fontSize: 11.5, background: C.gastoSuave, color: C.gasto, padding: "4px 10px", borderRadius: 20, fontWeight: 600 },
   badgeVencido: { fontSize: 10.5, background: C.gasto, color: "#fff", padding: "3px 8px", borderRadius: 12, fontWeight: 800, letterSpacing: "0.05em" },
   card: {
